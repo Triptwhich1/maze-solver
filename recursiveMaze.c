@@ -11,8 +11,7 @@
 #define CELL_SIZE_CM 150
 #define MOTOR_SPEED_LEFT 30
 #define MOTOR_SPEED_RIGHT 30
-#define OBSTACLE_SENSOR_THRESHOLD 200
-#define WALL_SENSOR_THRESHOLD 400
+#define OBSTACLE_SENSOR_THRESHOLD 150
 #define MOTOR_OFFSET 20
 #define BACKWARDS_DISTANCE 20 // Distance to move backwards when avoiding an obstacle
 #define ENABLE_DEBUG_IR 1
@@ -21,26 +20,62 @@
 typedef struct Cell
 {
     int visited;
-    int cell_state;
-    int shelter_pos;
-    int food_pos;
-    int water_pos;
+    bool is_intersection;
 } Cell;
 
 typedef struct Maze
 {
     Cell cells[CELLS_IN_MAZE]; // cells within the maze
+    int shelter_pos;
+    int food_pos;
+    int water_pos;
 } Maze;
+
+typedef struct
+{
+    int items[CELLS_IN_MAZE];
+    int top;
+} Stack;
 
 void initialise_maze(Maze *maze)
 {
     for (int n = 0; n < CELLS_IN_MAZE; n++)
     {
-        maze->cells[n].cell_state = 0; // nothing in them currently
-        maze->cells[n].visited = 0;    // unvisited
-        maze->cells[n].food_pos = 0;
-        maze->cells[n].water_pos = 0;
-        maze->cells[n].shelter_pos = 0;
+        maze->cells[n].visited = 0; // unvisited
+        maze->cells[n].is_intersection = false;
+    }
+}
+
+void initialise_stack(Stack *stack)
+{
+    stack->top = -1; // empty stack
+}
+
+void push(Stack *stack, int item)
+{
+    if (stack->top < CELLS_IN_MAZE - 1) // checks for stack overflow
+    {
+        stack->top++;
+        stack->items[stack->top] = item;
+    }
+    else
+    {
+        FA_LCDPrint("Stack Overflow", 0, 0, FONT_NORMAL, LCD_OPAQUE); // handles the stack overflow
+    }
+}
+
+int pop(Stack *stack)
+{
+    if (stack->top >= 0)
+    {
+        int item = stack->items[stack->top];
+        stack->top--;
+        return item;
+    }
+    else
+    {
+        FA_LCDPrint("Stack Underflow", 0, 0, FONT_NORMAL, LCD_OPAQUE);
+        return -1; // returns an invalid value
     }
 }
 
@@ -63,7 +98,7 @@ int read_line()
  * in the middle of the cell, for the robot to see what the next moves are for the DFS further in the program
  * @param pause_start_time pointer to when the pause started
  */
-void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number)
+void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *backtrack)
 {
     static int motors_started = 0;
     static int stopping = 0;
@@ -79,9 +114,13 @@ void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number)
     if (read_line() && !stopping && line_detect_time == 0)
     {
         number_of_lines++;
-        if (*cell_number < CELLS_IN_MAZE - 1)
+        if (*cell_number < CELLS_IN_MAZE - 1 && !(*backtrack))
         {
             (*cell_number)++;
+        }
+        else if (backtrack)
+        {
+            (*cell_number)--;
         }
         FA_LCDNumber(number_of_lines, 60, 4, FONT_NORMAL, LCD_OPAQUE);
         line_detect_time = FA_ClockMS();
@@ -102,14 +141,38 @@ void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number)
     }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num)
+bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, int *backtrack)
 {
-    maze->cells[*cell_num].visited = 1; // Marks the current cell as visited
-    FA_LCDNumber(*cell_num, 60, 16, FONT_NORMAL, LCD_OPAQUE);
+
+    if (!maze->cells[*cell_num].visited)
+    {
+        maze->cells[*cell_num].visited = 1;
+        FA_LCDNumber(*cell_num, 60, 16, FONT_NORMAL, LCD_OPAQUE);
+    }
 
     if (*cell_num == CELLS_IN_MAZE - 1)
     {
         return true;
+    }
+
+    if (FA_ReadIR(IR_FRONT) < OBSTACLE_SENSOR_THRESHOLD)
+    {
+        stop_when_line_hit(pause_start_time, cell_num, backtrack);
+    }
+    else if (FA_ReadIR(IR_RIGHT) < 50 && FA_ReadIR(IR_LEFT) > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Right(90);
+        stop_when_line_hit(pause_start_time, cell_num, backtrack);
+    }
+    else if (FA_ReadIR(IR_LEFT) < 50 && FA_ReadIR(IR_RIGHT) > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Left(90);
+        stop_when_line_hit(pause_start_time, cell_num, backtrack);
+    }
+    else if (FA_ReadIR(IR_FRONT) > 100 && FA_ReadIR(IR_LEFT) > 100 && FA_ReadIR(IR_RIGHT) > 100)
+    {
+
+        (*backtrack) = 1; // backtrack enabled
     }
 
     return false;
@@ -182,8 +245,8 @@ int main(void)
     Maze maze;
     initialise_maze(&maze); // Initialises Maze
 
+    int backtrack = 0;
     int cell_number = 0;
-
     int num_lines = 0;
 
     // int motor_l = MOTOR_SPEED_LEFT;
@@ -191,7 +254,7 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &cell_number);
+        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack);
     }
     return 0; // Actually, we should never get here...
 }
