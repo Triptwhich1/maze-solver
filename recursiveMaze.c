@@ -114,43 +114,68 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num)
         return true;
     }
 
-    // if (FA_ReadIR(IR_RIGHT) > OBSTACLE_SENSOR_THRESHOLD) {
-    //     FA_Right(90);
-    //     stop_when_line_hit(pause_start_time, cell_num);
-    //     if (!maze->cells[*cell_num].visited) {
-    //         if (traverse_maze(maze, cell_num, pause_start_time)){
-    //             return true;
-    //         }
-    //     }
-
-    // }
-
-    // if (FA_ReadIR(IR_FRONT) < OBSTACLE_SENSOR_THRESHOLD) {
-    //     FA_Right(90);
-    //     stop_when_line_hit(pause_start_time, cell_num);
-    //     if (!maze->cells[*cell_num].visited) {
-    //         if (traverse_maze(maze, cell_num, pause_start_time)){
-    //             return true;
-    //         }
-    //     }
-    // }
-
-    if (FA_ReadIR(IR_FRONT) < 150)
-    {
-        stop_when_line_hit(pause_start_time, cell_num);
-    }
-    else if (FA_ReadIR(IR_RIGHT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_LEFT) > 150)
-    {
-        FA_Left(90);
-    }
-    else if (FA_ReadIR(IR_LEFT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_RIGHT) > 150)
+    if (FA_ReadIR(IR_RIGHT) > OBSTACLE_SENSOR_THRESHOLD)
     {
         FA_Right(90);
-    }
-    else if (FA_ReadIR(IR_FRONT) > 150 && FA_ReadIR(IR_LEFT) > 150 && FA_ReadIR(IR_RIGHT) > 150)
-    {
+        stop_when_line_hit(pause_start_time, cell_num);
+        if (!maze->cells[*cell_num].visited)
+        {
+            if (traverse_maze(maze, cell_num, pause_start_time))
+            {
+                return true;
+            }
+        }
         FA_Right(180);
+        stop_when_line_hit(pause_start_time, cell_num);
     }
+
+    if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        stop_when_line_hit(pause_start_time, cell_num);
+        if (!maze->cells[*cell_num].visited)
+        {
+            if (traverse_maze(maze, cell_num, pause_start_time))
+            {
+                return true;
+            }
+        }
+        FA_Right(180);
+        stop_when_line_hit(pause_start_time, cell_num);
+    }
+
+    if (FA_ReadIR(IR_LEFT) > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Left(90);
+        stop_when_line_hit(pause_start_time, cell_num);
+        if (!maze->cells[*cell_num].visited)
+        {
+            if (traverse_maze(maze, cell_num, pause_start_time))
+            {
+                return true;
+            }
+        }
+        FA_Right(180);
+        stop_when_line_hit(pause_start_time, cell_num);
+    }
+
+    return false;
+
+    // if (FA_ReadIR(IR_FRONT) < 150)
+    // {
+    //     stop_when_line_hit(pause_start_time, cell_num);
+    // }
+    // else if (FA_ReadIR(IR_RIGHT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_LEFT) > 150)
+    // {
+    //     FA_Left(90);
+    // }
+    // else if (FA_ReadIR(IR_LEFT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_RIGHT) > 150)
+    // {
+    //     FA_Right(90);
+    // }
+    // else if (FA_ReadIR(IR_FRONT) > 150 && FA_ReadIR(IR_LEFT) > 150 && FA_ReadIR(IR_RIGHT) > 150)
+    // {
+    //     FA_Right(180);
+    // }
 }
 
 void debug_line_sensors()
