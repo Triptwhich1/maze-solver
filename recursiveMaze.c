@@ -10,8 +10,8 @@
 
 #define CELL_SIZE_CM 150
 #define MOTOR_SPEED_LEFT 30
-#define MOTOR_SPEED_RIGHT 32
-#define OBSTACLE_SENSOR_THRESHOLD 150
+#define MOTOR_SPEED_RIGHT 30
+#define OBSTACLE_SENSOR_THRESHOLD 200
 #define WALL_SENSOR_THRESHOLD 400
 #define MOTOR_OFFSET 20
 #define BACKWARDS_DISTANCE 20 // Distance to move backwards when avoiding an obstacle
@@ -22,6 +22,9 @@ typedef struct Cell
 {
     int visited;
     int cell_state;
+    int shelter_pos;
+    int food_pos;
+    int water_pos;
 } Cell;
 
 typedef struct Maze
@@ -35,6 +38,9 @@ void initialise_maze(Maze *maze)
     {
         maze->cells[n].cell_state = 0; // nothing in them currently
         maze->cells[n].visited = 0;    // unvisited
+        maze->cells[n].food_pos = 0;
+        maze->cells[n].water_pos = 0;
+        maze->cells[n].shelter_pos = 0;
     }
 }
 
@@ -73,7 +79,10 @@ void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number)
     if (read_line() && !stopping && line_detect_time == 0)
     {
         number_of_lines++;
-        (*cell_number)++;
+        if (*cell_number < CELLS_IN_MAZE - 1)
+        {
+            (*cell_number)++;
+        }
         FA_LCDNumber(number_of_lines, 60, 4, FONT_NORMAL, LCD_OPAQUE);
         line_detect_time = FA_ClockMS();
     }
@@ -93,89 +102,17 @@ void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number)
     }
 }
 
-bool is_viisted(Cell *cell)
-{
-    if (cell->visited == 1) // cell is visited
-    {
-        return true;
-    }
-    else // cell isn't already visited
-    {
-        return false;
-    }
-}
-
 bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num)
 {
-    maze->cells[*cell_num].visited = 1; // Marks the current ell as visited
+    maze->cells[*cell_num].visited = 1; // Marks the current cell as visited
+    FA_LCDNumber(*cell_num, 60, 16, FONT_NORMAL, LCD_OPAQUE);
 
-    if (*cell_num == CELLS_IN_MAZE)
+    if (*cell_num == CELLS_IN_MAZE - 1)
     {
         return true;
-    }
-
-    if (FA_ReadIR(IR_RIGHT) > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Right(90);
-        stop_when_line_hit(pause_start_time, cell_num);
-        if (!maze->cells[*cell_num].visited)
-        {
-            if (traverse_maze(maze, cell_num, pause_start_time))
-            {
-                return true;
-            }
-        }
-        FA_Right(180);
-        stop_when_line_hit(pause_start_time, cell_num);
-    }
-
-    if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        stop_when_line_hit(pause_start_time, cell_num);
-        if (!maze->cells[*cell_num].visited)
-        {
-            if (traverse_maze(maze, cell_num, pause_start_time))
-            {
-                return true;
-            }
-        }
-        FA_Right(180);
-        stop_when_line_hit(pause_start_time, cell_num);
-    }
-
-    if (FA_ReadIR(IR_LEFT) > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Left(90);
-        stop_when_line_hit(pause_start_time, cell_num);
-        if (!maze->cells[*cell_num].visited)
-        {
-            if (traverse_maze(maze, cell_num, pause_start_time))
-            {
-                return true;
-            }
-        }
-        FA_Right(180);
-        stop_when_line_hit(pause_start_time, cell_num);
     }
 
     return false;
-
-    // if (FA_ReadIR(IR_FRONT) < 150)
-    // {
-    //     stop_when_line_hit(pause_start_time, cell_num);
-    // }
-    // else if (FA_ReadIR(IR_RIGHT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_LEFT) > 150)
-    // {
-    //     FA_Left(90);
-    // }
-    // else if (FA_ReadIR(IR_LEFT) < 10 && FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD && FA_ReadIR(IR_RIGHT) > 150)
-    // {
-    //     FA_Right(90);
-    // }
-    // else if (FA_ReadIR(IR_FRONT) > 150 && FA_ReadIR(IR_LEFT) > 150 && FA_ReadIR(IR_RIGHT) > 150)
-    // {
-    //     FA_Right(180);
-    // }
 }
 
 void debug_line_sensors()
@@ -254,10 +191,7 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-              //        traverse_maze(&pause_start_time, &maze, &cell_number);
-        // FA_SetMotors(motor_r, motor_l);
-        // debug_motors(&motor_r, &motor_l);
-        debug_turn();
+        traverse_maze(&pause_start_time, &maze, &cell_number);
     }
     return 0; // Actually, we should never get here...
 }
