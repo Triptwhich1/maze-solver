@@ -134,6 +134,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
                 push(stack, *cell_number);
                 FA_BTSendString("cell added to stack \n", 30);
                 FA_BTSendNumber(size(stack));
+                FA_BTSendString("\n", 5);
                 (*cell_number)++;
             }
         }
@@ -143,6 +144,8 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
             {
                 pop(stack); // Pop the last cell from the stack when backtracking
                 FA_BTSendString("cell removed from stack \n", 30);
+                FA_BTSendNumber(size(stack));
+                FA_BTSendString("\n", 5);
             }
             (*cell_number)--;
         }
@@ -175,7 +178,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
  */
 void movement(int front, int right, int left, bool *backtrack)
 {
-    if (front > OBSTACLE_SENSOR_THRESHOLD && left > OBSTACLE_SENSOR_THRESHOLD && right > OBSTACLE_SENSOR_THRESHOLD)
+    if (front > OBSTACLE_SENSOR_THRESHOLD / 2 && left > OBSTACLE_SENSOR_THRESHOLD / 2 && right > OBSTACLE_SENSOR_THRESHOLD / 2)
     {
         (*backtrack) = 1; // backtrack enabled
         FA_BTSendString("Backtracking", 20);
@@ -220,7 +223,7 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         return true;
     }
 
-    if (FA_ReadIR(IR_FRONT) > 300 && !(*start_fix))
+    if (FA_ReadIR(IR_FRONT) > 200 && !(*start_fix))
     {
         (*start_fix) = true; // fix now applied
         FA_Right(90);        // specific weird edge case for starting in a spot where the robot needs to be rotated
