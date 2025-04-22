@@ -74,6 +74,24 @@ int pop(Stack *stack)
     }
 }
 
+int size(Stack *stack)
+{
+    return stack->top + 1;
+}
+/* Left wheel keeps messing up, so this is here to fix that hopefully.
+ */
+void adjust_wheel_encoders()
+{
+    int left_encoder = FA_ReadEncoder(0);
+    int right_encoder = FA_ReadEncoder(1);
+
+    int difference = left_encoder - right_encoder;
+    if (difference > 15)
+    {
+        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
+    }
+}
+
 int read_line()
 {
     static unsigned long last_time = 0;
@@ -115,6 +133,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
             {
                 push(stack, *cell_number);
                 FA_BTSendString("cell added to stack \n", 30);
+                FA_BTSendNumber(size(stack));
                 (*cell_number)++;
             }
         }
@@ -127,7 +146,6 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
             }
             (*cell_number)--;
         }
-        FA_LCDNumber(number_of_lines, 60, 4, FONT_NORMAL, LCD_OPAQUE);
         line_detect_time = FA_ClockMS();
     }
 
@@ -184,12 +202,11 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
 {
     if (maze->cells[*cell_num].is_intersection)
     {
-        if (!(*backtrack))
-        {
-            break;
+        if (*backtrack)
+        { // when backtracking isn't true just skip this
+            FA_BTSendString("Back at an intersection again\n", 30);
+            (*backtrack) = false; // backtracking is completed now that it is in an intersection again
         }
-        FA_BTSendString("Back at an intersection again\n", 30);
-        (*backtrack) = false; // backtracking is completed now that it is in an intersection again
     }
 
     if (!maze->cells[*cell_num].visited)
@@ -212,6 +229,9 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
 
     if (stop_when_line_hit(pause_start_time, cell_num, backtrack, stack))
     {
+        (*start_fix) = true; // didn't need fixing
+
+        adjust_wheel_encoders();
 
         int front = FA_ReadIR(IR_FRONT);
         int left = FA_ReadIR(IR_LEFT);
