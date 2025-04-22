@@ -58,10 +58,6 @@ void push(Stack *stack, int item)
         stack->top++;
         stack->items[stack->top] = item;
     }
-    else
-    {
-        FA_LCDPrint("Stack Overflow", 0, 0, FONT_NORMAL, LCD_OPAQUE); // handles the stack overflow
-    }
 }
 
 int pop(Stack *stack)
@@ -71,11 +67,6 @@ int pop(Stack *stack)
         int item = stack->items[stack->top];
         stack->top--;
         return item;
-    }
-    else
-    {
-        FA_LCDPrint("Stack Underflow", 0, 0, FONT_NORMAL, LCD_OPAQUE);
-        return -1; // returns an invalid value
     }
 }
 
@@ -98,7 +89,7 @@ int read_line()
  * in the middle of the cell, for the robot to see what the next moves are for the DFS further in the program
  * @param pause_start_time pointer to when the pause started
  */
-void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *backtrack)
+bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *backtrack)
 {
     static int motors_started = 0;
     static int stopping = 0;
@@ -138,6 +129,28 @@ void stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *
     if (stopping && FA_ClockMS() - *pause_start_time >= 500) // Stops the robot after the line has been seen, this stops it for 500ms to get correct sensor readings
     {
         stopping = 0;
+        return true; // finished stopping
+    }
+    return false;
+}
+
+void movement(int front, int right, int left)
+{
+    if (front < OBSTACLE_SENSOR_THRESHOLD)
+    {
+    }
+    else if (right < 50 && left > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Right(90);
+    }
+    else if (left < 50 && right > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Left(90);
+    }
+    else if (front > 100 && left > 100 && right > 100)
+    {
+        (*backtrack) = 1; // backtrack enabled
+        FA_Left(180);
     }
 }
 
@@ -155,26 +168,19 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, i
         return true;
     }
 
-    if (FA_ReadIR(IR_FRONT) < OBSTACLE_SENSOR_THRESHOLD)
+    if (stop_when_line_hit(pause_start_time, cell_num, backtrack))
     {
-        stop_when_line_hit(pause_start_time, cell_num, backtrack);
-    }
-    else if (FA_ReadIR(IR_RIGHT) < 50 && FA_ReadIR(IR_LEFT) > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Right(90);
-        stop_when_line_hit(pause_start_time, cell_num, backtrack);
-    }
-    else if (FA_ReadIR(IR_LEFT) < 50 && FA_ReadIR(IR_RIGHT) > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Left(90);
-        stop_when_line_hit(pause_start_time, cell_num, backtrack);
-    }
-    else if (FA_ReadIR(IR_FRONT) > 100 && FA_ReadIR(IR_LEFT) > 100 && FA_ReadIR(IR_RIGHT) > 100)
-    {
+        int front = FA_ReadIR(IR_FRONT);
+        int left = FA_ReadIR(IR_LEFT);
+        int right = FA_ReadIR(IR_RIGHT);
 
-        (*backtrack) = 1; // backtrack enabled
-    }
+        if ((front < 10 && left < 10) || (front < 10 && right < 10)) // marks the cell as an intersection
+        {
+            maze->cells[*cell_num].is_intersection = true;
+        }
 
+        movement(front, right, left);
+    }
     return false;
 }
 
