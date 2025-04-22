@@ -11,7 +11,7 @@
 #define CELL_SIZE_CM 150
 #define MOTOR_SPEED_LEFT 30
 #define MOTOR_SPEED_RIGHT 30
-#define OBSTACLE_SENSOR_THRESHOLD 150
+#define OBSTACLE_SENSOR_THRESHOLD 200
 #define MOTOR_OFFSET 20
 #define BACKWARDS_DISTANCE 20 // Distance to move backwards when avoiding an obstacle
 #define ENABLE_DEBUG_IR 1
@@ -86,7 +86,7 @@ int read_line()
 
 /*
  * This function makes the robot stops 500ms after a line has been hit to stop
- * in the middle of the cell, for the robot to see what the next moves are for the DFS further in the program
+ * in the middle of the cell, for the robot to see what the next moves are
  * @param pause_start_time pointer to when the pause started
  */
 bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *backtrack)
@@ -134,28 +134,53 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *
     return false;
 }
 
-void movement(int front, int right, int left)
+/*
+ * This function makes the robot move either right, left or start backtracking
+ * @param front sensor value for the front
+ * @param right for the right
+ * @param left for the left
+ * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
+ */
+void movement(int front, int right, int left, int *backtrack)
 {
     if (front < OBSTACLE_SENSOR_THRESHOLD)
     {
+        // do nothing
     }
-    else if (right < 50 && left > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Right(90);
-    }
-    else if (left < 50 && right > OBSTACLE_SENSOR_THRESHOLD)
-    {
-        FA_Left(90);
-    }
-    else if (front > 100 && left > 100 && right > 100)
+    else if (front > OBSTACLE_SENSOR_THRESHOLD && left > OBSTACLE_SENSOR_THRESHOLD && right > OBSTACLE_SENSOR_THRESHOLD)
     {
         (*backtrack) = 1; // backtrack enabled
         FA_Left(180);
     }
+    else if (right < 20 && left > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Right(90);
+    }
+    else if (left < 20 && right > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Left(90);
+    }
+    else if (front > OBSTACLE_SENSOR_THRESHOLD)
+    {
+        FA_Right(90); // if it is more than the threashold then turn right (random direction)
+    }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, int *backtrack)
+bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, int *backtrack, Stack *stack)
 {
+    if (*backtrack)
+    {
+        push(stack, *cell_num); // push to route stack
+    }
+    else
+    {
+        pop(stack);
+    }
+
+    if (maze->cells[*cell_num].is_intersection)
+    {
+        (*backtrack) = false; // backtracking is completed now that it is in an intersection again
+    }
 
     if (!maze->cells[*cell_num].visited)
     {
@@ -170,16 +195,17 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, i
 
     if (stop_when_line_hit(pause_start_time, cell_num, backtrack))
     {
+
         int front = FA_ReadIR(IR_FRONT);
         int left = FA_ReadIR(IR_LEFT);
         int right = FA_ReadIR(IR_RIGHT);
 
-        if ((front < 10 && left < 10) || (front < 10 && right < 10)) // marks the cell as an intersection
+        if ((front < 10 && left < 10) || (front < 10 && right < 10 || left < 10 && right < 10)) // marks the cell as an intersection
         {
             maze->cells[*cell_num].is_intersection = true;
         }
 
-        movement(front, right, left);
+        movement(front, right, left, &backtrack);
     }
     return false;
 }
@@ -251,6 +277,9 @@ int main(void)
     Maze maze;
     initialise_maze(&maze); // Initialises Maze
 
+    Stack stack;
+    initialise_stack(&stack);
+
     int backtrack = 0;
     int cell_number = 0;
     int num_lines = 0;
@@ -260,7 +289,8 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack);
+        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack);
+        //        debug_IR();
     }
     return 0; // Actually, we should never get here...
 }
