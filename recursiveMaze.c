@@ -68,6 +68,10 @@ int pop(Stack *stack)
         stack->top--;
         return item;
     }
+    else
+    {
+        return -1; // Return an invalid value to indicate the stack is empty
+    }
 }
 
 int read_line()
@@ -89,7 +93,7 @@ int read_line()
  * in the middle of the cell, for the robot to see what the next moves are
  * @param pause_start_time pointer to when the pause started
  */
-bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *backtrack)
+bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool *backtrack, Stack *stack)
 {
     static int motors_started = 0;
     static int stopping = 0;
@@ -107,10 +111,20 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *
         number_of_lines++;
         if (*cell_number < CELLS_IN_MAZE - 1 && !(*backtrack))
         {
-            (*cell_number)++;
+            if (stack->top < CELLS_IN_MAZE - 1)
+            {
+                push(stack, *cell_number);
+                FA_BTSendString("cell added to stack \n", 30);
+                (*cell_number)++;
+            }
         }
-        else if (backtrack)
+        else if (*backtrack)
         {
+            if (stack->top >= 0)
+            {
+                pop(stack); // Pop the last cell from the stack when backtracking
+                FA_BTSendString("cell removed from stack \n", 30);
+            }
             (*cell_number)--;
         }
         FA_LCDNumber(number_of_lines, 60, 4, FONT_NORMAL, LCD_OPAQUE);
@@ -141,44 +155,40 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, int *
  * @param left for the left
  * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
  */
-void movement(int front, int right, int left, int *backtrack)
+void movement(int front, int right, int left, bool *backtrack)
 {
-    if (front < OBSTACLE_SENSOR_THRESHOLD)
-    {
-        // do nothing
-    }
-    else if (front > OBSTACLE_SENSOR_THRESHOLD && left > OBSTACLE_SENSOR_THRESHOLD && right > OBSTACLE_SENSOR_THRESHOLD)
+    if (front > OBSTACLE_SENSOR_THRESHOLD && left > OBSTACLE_SENSOR_THRESHOLD && right > OBSTACLE_SENSOR_THRESHOLD)
     {
         (*backtrack) = 1; // backtrack enabled
+        FA_BTSendString("Backtracking", 20);
         FA_Left(180);
     }
-    else if (right < 20 && left > OBSTACLE_SENSOR_THRESHOLD)
+    else if (right < 20 && left > OBSTACLE_SENSOR_THRESHOLD / 2) // obstacle threashold is now 125, so it will be detected from further
     {
+        FA_BTSendString("Turning right", 20);
         FA_Right(90);
     }
-    else if (left < 20 && right > OBSTACLE_SENSOR_THRESHOLD)
+    else if (left < 20 && right > OBSTACLE_SENSOR_THRESHOLD / 2)
     {
+        FA_BTSendString("Turning left", 20);
         FA_Left(90);
     }
-    else if (front > OBSTACLE_SENSOR_THRESHOLD)
+    else if (front > OBSTACLE_SENSOR_THRESHOLD / 2) // front is now detected much further away
     {
+        FA_BTSendString("Front obstacle in the way", 40);
         FA_Right(90); // if it is more than the threashold then turn right (random direction)
     }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, int *backtrack, Stack *stack)
+bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix)
 {
-    if (*backtrack)
-    {
-        push(stack, *cell_num); // push to route stack
-    }
-    else
-    {
-        pop(stack);
-    }
-
     if (maze->cells[*cell_num].is_intersection)
     {
+        if (!(*backtrack))
+        {
+            break;
+        }
+        FA_BTSendString("Back at an intersection again\n", 30);
         (*backtrack) = false; // backtracking is completed now that it is in an intersection again
     }
 
@@ -193,19 +203,27 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, i
         return true;
     }
 
-    if (stop_when_line_hit(pause_start_time, cell_num, backtrack))
+    if (FA_ReadIR(IR_FRONT) > 300 && !(*start_fix))
+    {
+        (*start_fix) = true; // fix now applied
+        FA_Right(90);        // specific weird edge case for starting in a spot where the robot needs to be rotated
+        FA_BTSendString("Fix happened\n", 30);
+    }
+
+    if (stop_when_line_hit(pause_start_time, cell_num, backtrack, stack))
     {
 
         int front = FA_ReadIR(IR_FRONT);
         int left = FA_ReadIR(IR_LEFT);
         int right = FA_ReadIR(IR_RIGHT);
 
-        if ((front < 10 && left < 10) || (front < 10 && right < 10 || left < 10 && right < 10)) // marks the cell as an intersection
+        if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
         {
             maze->cells[*cell_num].is_intersection = true;
+            FA_BTSendString("Intersection found\n", 30);
         }
 
-        movement(front, right, left, &backtrack);
+        movement(front, right, left, backtrack);
     }
     return false;
 }
@@ -270,6 +288,13 @@ int main(void)
 
     FA_RobotInit();
 
+    bool state = FA_BTConnected();
+    while (!state)
+    {
+        state = FA_BTConnected();
+    }
+    FA_BTSendNumber(10);
+
     FA_LCDBacklight(50);  // Switch on backlight (half brightness)
     FA_DelayMillis(2000); // Pause 2 secs
 
@@ -280,16 +305,17 @@ int main(void)
     Stack stack;
     initialise_stack(&stack);
 
-    int backtrack = 0;
+    bool backtrack = false;
     int cell_number = 0;
     int num_lines = 0;
+    bool start_fix = false;
 
     // int motor_l = MOTOR_SPEED_LEFT;
     // int motor_r = MOTOR_SPEED_RIGHT;
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack);
+        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack, &start_fix);
         //        debug_IR();
     }
     return 0; // Actually, we should never get here...
