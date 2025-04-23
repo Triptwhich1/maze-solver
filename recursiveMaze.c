@@ -256,7 +256,7 @@ void movement(int front, int right, int left, int front_right, int front_left, b
     }
 }
 
-void updated_cell_based_movement(Cell cell)
+void updated_cell_based_movement(Cell cell, bool *backtrack)
 {
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
@@ -276,7 +276,7 @@ void updated_cell_based_movement(Cell cell)
     }
     else if (cell.walls.front)
     {
-        FA_BTSendString("Turning right", 20);
+        FA_BTSendString("Front obstacle", 20);
         FA_Right(90); // turn 90 degrees right when there is something in front
     }
 }
@@ -340,16 +340,16 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
-        set_walls(front, right, left, rear, &maze->cells[*cell_num].walls);
+        set_walls(front, right, left, rear, &maze->cells[*cell_num].walls); // sets walls of cell
 
         // if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
         // {
         //     maze->cells[*cell_num].is_intersection = true;
         //     FA_BTSendString("Intersection found\n", 30);
         // }
-        is_intersection(maze->cells[*cell_num]);
+        is_intersection(&maze->cells[*cell_num]); // declares if cell is an intersection
 
-        updated_cell_based_movement(maze->cells[*cell_num]);
+        updated_cell_based_movement(maze->cells[*cell_num], backtrack); // updates the movement of the cell
         // movement(front, right, left, backtrack);
     }
     return false;
@@ -434,7 +434,6 @@ int main(void)
 
     bool backtrack = false;
     int cell_number = 0;
-    int num_lines = 0;
     bool start_fix = false;
 
     // int motor_l = MOTOR_SPEED_LEFT;
