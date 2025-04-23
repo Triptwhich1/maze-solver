@@ -33,6 +33,8 @@ typedef struct Walls
 typedef struct Cell
 {
     int visited;
+    int x;
+    int y;
     Walls walls;
     bool is_intersection;
 } Cell;
@@ -53,52 +55,58 @@ typedef struct
 
 void initialise_maze(Maze *maze)
 {
-    for (int n = 0; n < CELLS_IN_MAZE; n++)
+    for (int r = 0; r < 5; r++)
     {
-        maze->cells[n].visited = 0; // unvisited
-        maze->cells[n].is_intersection = false;
+        for (int c = 0; c < 5; c++)
+        {
+            maze->cells[r][c].visited = 0; // unvisited
+            maze->cells[r][c].is_intersection = false;
 
-        maze->cells[n].walls.front = false;
-        maze->cells[n].walls.left = false;
-        maze->cells[n].walls.right = false;
-        maze->cells[n].walls.rear = false;
+            maze->cells[r][c].x = r; // sets the x as the rows
+            maze->cells[r][c].y = c; // sets the y as the columns
+
+            maze->cells[r][c].walls.front = false;
+            maze->cells[r][c].walls.left = false;
+            maze->cells[r][c].walls.right = false;
+            maze->cells[r][c].walls.rear = false;
+        }
     }
 }
 
-void initialise_stack(Stack *stack)
-{
-    stack->top = -1; // empty stack
-}
+// void initialise_stack(Stack *stack)
+// {
+//     stack->top = -1; // empty stack
+// }
 
-void push(Stack *stack, int item)
-{
-    if (stack->top < CELLS_IN_MAZE - 1) // checks for stack overflow
-    {
-        stack->top++;
-        stack->items[stack->top] = item;
-    }
-}
+// void push(Stack *stack, int item)
+// {
+//     if (stack->top < CELLS_IN_MAZE - 1) // checks for stack overflow
+//     {
+//         stack->top++;
+//         stack->items[stack->top] = item;
+//     }
+// }
 
-int pop(Stack *stack)
-{
-    if (stack->top >= 0)
-    {
-        int item = stack->items[stack->top];
-        stack->top--;
-        return item;
-    }
-    else
-    {
-        return -1; // Return an invalid value to indicate the stack is empty
-    }
-}
+// int pop(Stack *stack)
+// {
+//     if (stack->top >= 0)
+//     {
+//         int item = stack->items[stack->top];
+//         stack->top--;
+//         return item;
+//     }
+//     else
+//     {
+//         return -1; // Return an invalid value to indicate the stack is empty
+//     }
+// }
 
-int size(Stack *stack)
-{
-    return stack->top + 1;
-}
-/* Left wheel keeps messing up, so this is here to fix that hopefully.
- */
+// int size(Stack *stack)
+// {
+//     return stack->top + 1;
+// }
+// /* Left wheel keeps messing up, so this is here to fix that hopefully.
+//  */
 void adjust_wheel_encoders()
 {
     int left_encoder = FA_ReadEncoder(0);
@@ -174,7 +182,7 @@ void set_walls(int front, int right, int left, int rear, Walls *walls)
  * @param backtrack flag for when backtracking is or isn't in progress
  * @param stack that the route is being added to
  */
-bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool *backtrack, Stack *stack)
+bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns, bool *backtrack, Robot *robot)
 {
     static int motors_started = 0;
     static int stopping = 0;
@@ -189,28 +197,22 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
 
     if (read_line() && !stopping && line_detect_time == 0)
     {
-        number_of_lines++;
-        if (*cell_number < CELLS_IN_MAZE - 1 && !(*backtrack))
+        switch (robot->direction)
         {
-            if (stack->top < CELLS_IN_MAZE - 1)
-            {
-                push(stack, *cell_number);
-                FA_BTSendString("cell added to stack \n", 30);
-                FA_BTSendNumber(size(stack));
-                FA_BTSendString("\n", 5);
-                (*cell_number)++;
-            }
-        }
-        else if (*backtrack)
-        {
-            if (stack->top >= 0)
-            {
-                pop(stack); // Pop the last cell from the stack when backtracking
-                FA_BTSendString("cell removed from stack \n", 30);
-                FA_BTSendNumber(size(stack));
-                FA_BTSendString("\n", 5);
-            }
-            (*cell_number)--;
+        case 0:
+            (*columns)++;
+            break;
+        case 1:
+            (*rows)++;
+            break;
+        case 2:
+            (*columns)--;
+            break;
+        case 3:
+            (*rows)--;
+            break;
+        default:
+            break;
         }
         line_detect_time = FA_ClockMS();
     }
@@ -244,6 +246,8 @@ char *get_facing(int direction)
         return "South";
     case 3:
         return "West";
+    default:
+        return "";
     }
 }
 
@@ -266,7 +270,7 @@ void set_direction(Robot *robot, int turn_type)
     case 3:
         robot->direction = (robot->direction + 2) % 4; // turn around
         FA_BTSendString("Robot is now facing ", 25);
-        FA_BTSendString(get_facing(robot->direction)), 10);
+        FA_BTSendString(get_facing(robot->direction), 10);
         FA_BTSendString("\n", 5);
         break;
     default:
@@ -322,9 +326,9 @@ void set_intersection(Cell *cell)
     }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix, Robot *robot)
+bool traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack, bool *start_fix, Robot *robot, int *rows, int *columns)
 {
-    if (maze->cells[*cell_num].is_intersection)
+    if (maze->cells[*rows][*columns].is_intersection)
     {
         if (*backtrack)
         { // when backtracking isn't true just skip this
@@ -333,15 +337,9 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         }
     }
 
-    if (!maze->cells[*cell_num].visited)
+    if (!maze->cells[*rows][*columns].visited)
     {
-        maze->cells[*cell_num].visited = 1;
-        FA_LCDNumber(*cell_num, 60, 16, FONT_NORMAL, LCD_OPAQUE);
-    }
-
-    if (*cell_num == CELLS_IN_MAZE - 1)
-    {
-        return true;
+        maze->cells[*rows][*columns].visited = 1;
     }
 
     if (FA_ReadIR(IR_FRONT) > 200 && !(*start_fix))
@@ -351,9 +349,17 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         FA_BTSendString("Fix happened\n", 30);
     }
 
-    if (stop_when_line_hit(pause_start_time, cell_num, backtrack, stack))
+    if (stop_when_line_hit(pause_start_time, rows, columns, backtrack, robot))
     {
         (*start_fix) = true; // didn't need fixing
+
+        FA_BTSendString("row: ", 10);
+        FA_BTSendNumber(*rows);
+        FA_BTSendString("\n", 4);
+
+        FA_BTSendString("column: ", 10);
+        FA_BTSendNumber(*columns);
+        FA_BTSendString("\n", 4);
 
         adjust_wheel_encoders();
 
@@ -362,11 +368,11 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
-        set_walls(front, right, left, rear, &maze->cells[*cell_num].walls); // sets walls of cell
+        set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
-        set_intersection(&maze->cells[*cell_num]); // declares if cell is an intersection
+        set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
 
-        wall_based_movement(maze->cells[*cell_num], backtrack, robot); // updates the movement of the cell
+        wall_based_movement(maze->cells[*rows][*columns], backtrack, robot); // updates the movement of the cell
     }
     return false;
 }
@@ -459,11 +465,10 @@ int main(void)
     Maze maze;
     initialise_maze(&maze); // Initialises Maze
 
-    Stack stack;
-    initialise_stack(&stack);
+    int rows = 0;
+    int columns = 0;
 
     bool backtrack = false;
-    int cell_number = 0;
     bool start_fix = false;
 
     // int motor_l = MOTOR_SPEED_LEFT;
@@ -471,7 +476,7 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack, &start_fix, &robot);
+        traverse_maze(&pause_start_time, &maze, &backtrack, &start_fix, &robot, &rows, &columns);
         //        debug_IR();
         // debug_walls();
         // FA_DelayMillis(3000);
