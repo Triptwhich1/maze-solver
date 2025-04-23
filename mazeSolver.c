@@ -39,7 +39,7 @@ typedef struct Cell
 
 typedef struct Maze
 {
-    Cell cells[CELLS_IN_MAZE]; // cells within the maze
+    Cell cells[5][5]; // cells within the maze
     int shelter_pos;
     int food_pos;
     int water_pos;
@@ -127,10 +127,10 @@ int read_line()
 
 void set_walls(int front, int right, int left, int rear, Walls *walls)
 {
-    walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 2); // sets the front wall based on if front < obstacle threashold as it returns either true or false
-    walls->right = (right > OBSTACLE_SENSOR_THRESHOLD / 2);
-    walls->left = (left > OBSTACLE_SENSOR_THRESHOLD / 2);
-    walls->rear = (rear > OBSTACLE_SENSOR_THRESHOLD / 2);
+    walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 4); // sets the front wall based on if front > obstacle threashold as it returns either true or false
+    walls->right = (right > OBSTACLE_SENSOR_THRESHOLD / 4);
+    walls->left = (left > OBSTACLE_SENSOR_THRESHOLD / 4);
+    walls->rear = (rear > OBSTACLE_SENSOR_THRESHOLD / 4);
 
     if (walls->front == true)
     {
@@ -170,6 +170,9 @@ void set_walls(int front, int right, int left, int rear, Walls *walls)
  * This function makes the robot stops 500ms after a line has been hit to stop
  * in the middle of the cell, for the robot to see what the next moves are
  * @param pause_start_time pointer to when the pause started
+ * @param cell_number current cell number that the robot is on
+ * @param backtrack flag for when backtracking is or isn't in progress
+ * @param stack that the route is being added to
  */
 bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool *backtrack, Stack *stack)
 {
@@ -229,60 +232,81 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
     return false;
 }
 
+char *get_facing(int direction)
+{
+    switch (direction)
+    {
+    case 0:
+        return "North";
+    case 1:
+        return "East";
+    case 2:
+        return "South";
+    case 3:
+        return "West";
+    }
+}
+
+void set_direction(Robot *robot, int turn_type)
+{
+    switch (turn_type)
+    {
+    case 1:
+        robot->direction = (robot->direction + 1) % 4; // right turn
+        FA_BTSendString("Robot is now facing ", 25);
+        FA_BTSendString(get_facing(robot->direction), 10);
+        FA_BTSendString("\n", 5);
+        break;
+    case 2:
+        robot->direction = (robot->direction + 3) % 4; // left turn
+        FA_BTSendString("Robot is now facing ", 25);
+        FA_BTSendString(get_facing(robot->direction), 10);
+        FA_BTSendString("\n", 5);
+        break;
+    case 3:
+        robot->direction = (robot->direction + 2) % 4; // turn around
+        FA_BTSendString("Robot is now facing ", 25);
+        FA_BTSendString(get_facing(robot->direction)), 10);
+        FA_BTSendString("\n", 5);
+        break;
+    default:
+        break;
+    }
+}
+
 /*
- * This function makes the robot move either right, left or start backtracking
+ * This function makes the robot move either right, left or start backtracking based on how many walls surround the current cell
  * @param front sensor value for the front
  * @param right for the right
  * @param left for the left
  * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
  */
-void movement(int front, int right, int left, int front_right, int front_left, bool *backtrack)
-{
-    if (front > OBSTACLE_SENSOR_THRESHOLD / 2 && left > OBSTACLE_SENSOR_THRESHOLD / 2 && right > OBSTACLE_SENSOR_THRESHOLD / 2)
-    {
-        (*backtrack) = 1; // backtrack enabled
-        FA_BTSendString("Backtracking", 20);
-        FA_Left(180);
-    }
-    else if (right < 20 && left > OBSTACLE_SENSOR_THRESHOLD / 2) // obstacle threashold is now 125, so it will be detected from further
-    {
-        FA_BTSendString("Turning right", 20);
-        FA_Right(90);
-    }
-    else if (left < 20 && right > OBSTACLE_SENSOR_THRESHOLD / 2)
-    {
-        FA_BTSendString("Turning left", 20);
-        FA_Left(90);
-    }
-    else if (front > OBSTACLE_SENSOR_THRESHOLD) // front is now detected much further away
-    {
-        FA_BTSendString("Front obstacle in the way", 40);
-        FA_Right(90); // if it is more than the threashold then turn right (random direction)
-    }
-}
-
-void updated_cell_based_movement(Cell cell, bool *backtrack, Robot *robot)
+void wall_based_movement(Cell cell, bool *backtrack, Robot *robot)
 {
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
         (*backtrack) = 1; // backtrack enabled
         FA_BTSendString("Backtracking", 20);
         FA_Left(180);
+        set_direction(robot, 3); // backtracking turn
     }
     else if (!cell.walls.right) // if there are no walls on the right then turn righ
     {
         FA_BTSendString("Turning right", 20);
         FA_Right(90);
+        set_direction(robot, 1); // right turn
     }
     else if (!cell.walls.left) // if no walls on the left then turn left
     {
         FA_BTSendString("Turning left", 20);
         FA_Left(90);
+        set_direction(robot, 2); // left turn
     }
     else if (cell.walls.front)
     {
         FA_BTSendString("Front obstacle", 20);
         FA_Right(90); // turn 90 degrees right when there is something in front
+        set_direction(robot, 1);
     }
 }
 
@@ -295,24 +319,6 @@ void set_intersection(Cell *cell)
         {
             cell->is_intersection = true;
         }
-    }
-}
-
-void set_direction(Robot *robot, int turn_type)
-{
-    switch (turn_type)
-    {
-    case 1:
-        robot->direction = (robot->direction + 1) % 4; // right turn
-        break;
-    case 2:
-        robot->direction = (robot->direction + 3) % 4; // left turn
-        break;
-    case 3:
-        robot->direction = (robot->direction + 2) % 4; // turn around
-        break;
-    default:
-        break;
     }
 }
 
@@ -358,15 +364,9 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
 
         set_walls(front, right, left, rear, &maze->cells[*cell_num].walls); // sets walls of cell
 
-        // if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
-        // {
-        //     maze->cells[*cell_num].is_intersection = true;
-        //     FA_BTSendString("Intersection found\n", 30);
-        // }
         set_intersection(&maze->cells[*cell_num]); // declares if cell is an intersection
 
-        updated_cell_based_movement(maze->cells[*cell_num], backtrack, robot); // updates the movement of the cell
-        // movement(front, right, left, backtrack);
+        wall_based_movement(maze->cells[*cell_num], backtrack, robot); // updates the movement of the cell
     }
     return false;
 }
@@ -444,7 +444,7 @@ int main(void)
     FA_RobotInit();
 
     Robot robot;
-    robot.direction = 1;
+    robot.direction = 0; // relative direction, which in this case is north
 
     while (!FA_BTConnected()) // wait until bluetooth is connected
     {
