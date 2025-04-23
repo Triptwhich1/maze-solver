@@ -256,34 +256,49 @@ void movement(int front, int right, int left, int front_right, int front_left, b
     }
 }
 
-// void updated_cell_based_movement(Cell cell)
-// {
-//     if (cell.walls.front && cell.walls.left && cell.walls.right)
-//     {
-//         (*backtrack) = 1; // backtrack enabled
-//         FA_BTSendString("Backtracking", 20);
-//         FA_Left(180);
-//     }
-//     else if (cell.walls.front && cell.walls.left)
-//     { // is a wall at the front and at the left
-//         FA_BTSendString("Turning right", 20);
-//         FA_Right(90); // turn 90 degrees at an intersection
-//     }
-//     else if (cell.walls.front && cell.walls.right)
-//     { // is a wall at the front and at the right
-//         FA_BTSendString("Turning left", 20);
-//         FA_Left(90); // turn 90 degrees at an intersection
-//     }
-//     else if (cell.walls.front)
-//     {
-//         FA_BTSendString("Turning right", 20);
-//         FA_Right(90); // turn 90 degrees right when there is something in front
-//     }
-// }
+void updated_cell_based_movement(Cell cell)
+{
+    if (cell.walls.front && cell.walls.left && cell.walls.right)
+    {
+        (*backtrack) = 1; // backtrack enabled
+        FA_BTSendString("Backtracking", 20);
+        FA_Left(180);
+    }
+    else if (cell.walls.front && cell.walls.left)
+    { // is a wall at the front and at the left
+        FA_BTSendString("Turning right", 20);
+        FA_Right(90); // turn 90 degrees at an intersection
+    }
+    else if (cell.walls.front && cell.walls.right)
+    { // is a wall at the front and at the right
+        FA_BTSendString("Turning left", 20);
+        FA_Left(90); // turn 90 degrees at an intersection
+    }
+    else if (cell.walls.front)
+    {
+        FA_BTSendString("Turning right", 20);
+        FA_Right(90); // turn 90 degrees right when there is something in front
+    }
+}
 
-// void is_intersection(Cell *cell) {
-//     if (cell->walls.)
-// }
+void is_intersection(Cell *cell)
+{
+    if (!cell->is_intersection)
+    {
+        if (cell->walls.right && cell->walls.front && cell->walls.rear && !cell->walls.left) // cell with open right, open front, open rear
+        {
+            cell->is_intersection = true;
+        }
+        else if (cell->walls.left && cell->walls.front && cell->walls.rear && !cell->walls.right) // cell with open left, open front, open rear
+        {
+            cell->is_intersection = true;
+        }
+        else if (cell->walls.front && !cell->walls.left && !cell->walls.rear && !cell->walls.right) // cell with open right, left and rear
+        {
+            cell->is_intersection = true;
+        }
+    }
+}
 
 bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix)
 {
@@ -327,13 +342,15 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
 
         set_walls(front, right, left, rear, &maze->cells[*cell_num].walls);
 
-        if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
-        {
-            maze->cells[*cell_num].is_intersection = true;
-            FA_BTSendString("Intersection found\n", 30);
-        }
+        // if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
+        // {
+        //     maze->cells[*cell_num].is_intersection = true;
+        //     FA_BTSendString("Intersection found\n", 30);
+        // }
+        is_intersection(maze->cells[*cell_num]);
 
-        movement(front, right, left, backtrack);
+        updated_cell_based_movement(maze->cells[*cell_num]);
+        // movement(front, right, left, backtrack);
     }
     return false;
 }
