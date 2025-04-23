@@ -17,9 +17,18 @@
 #define ENABLE_DEBUG_IR 1
 #define CELLS_IN_MAZE 25
 
+typedef struct Walls
+{
+    bool left;
+    bool right;
+    bool front;
+    bool rear;
+} Walls;
+
 typedef struct Cell
 {
     int visited;
+    Walls walls;
     bool is_intersection;
 } Cell;
 
@@ -43,6 +52,11 @@ void initialise_maze(Maze *maze)
     {
         maze->cells[n].visited = 0; // unvisited
         maze->cells[n].is_intersection = false;
+
+        maze->cells[n].walls.front = false;
+        maze->cells[n].walls.left = false;
+        maze->cells[n].walls.right = false;
+        maze->cells[n].walls.rear = false;
     }
 }
 
@@ -104,6 +118,47 @@ int read_line()
         seen_line = 1;
     }
     return seen_line;
+}
+
+void set_walls(int front, int right, int left, int rear, Walls *walls)
+{
+    walls->front = (front < OBSTACLE_SENSOR_THRESHOLD); // sets the front wall based on if front < obstacle threashold as it returns either true or false
+    walls->right = (right < OBSTACLE_SENSOR_THRESHOLD);
+    walls->left = (left < OBSTACLE_SENSOR_THRESHOLD);
+    walls->rear = (rear < OBSTACLE_SENSOR_THRESHOLD);
+
+    if (walls->front == true)
+    {
+        FA_BTSendString("F, ", 4);
+    }
+    else
+    {
+        FA_BTSendString("X, ", 4);
+    }
+    if (walls->left == true)
+    {
+        FA_BTSendString("L, ", 4);
+    }
+    else
+    {
+        FA_BTSendString("X, ", 4);
+    }
+    if (walls->right == true)
+    {
+        FA_BTSendString("R, ", 4);
+    }
+    else
+    {
+        FA_BTSendString("X, ", 4);
+    }
+    if (walls->front == true)
+    {
+        FA_BTSendString("F, \n", 6);
+    }
+    else
+    {
+        FA_BTSendString("X, \n", 6);
+    }
 }
 
 /*
@@ -176,7 +231,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
  * @param left for the left
  * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
  */
-void movement(int front, int right, int left, bool *backtrack)
+void movement(int front, int right, int left, int front_right, int front_left, bool *backtrack)
 {
     if (front > OBSTACLE_SENSOR_THRESHOLD / 2 && left > OBSTACLE_SENSOR_THRESHOLD / 2 && right > OBSTACLE_SENSOR_THRESHOLD / 2)
     {
@@ -194,12 +249,41 @@ void movement(int front, int right, int left, bool *backtrack)
         FA_BTSendString("Turning left", 20);
         FA_Left(90);
     }
-    else if (front > OBSTACLE_SENSOR_THRESHOLD / 2) // front is now detected much further away
+    else if (front > OBSTACLE_SENSOR_THRESHOLD) // front is now detected much further away
     {
         FA_BTSendString("Front obstacle in the way", 40);
         FA_Right(90); // if it is more than the threashold then turn right (random direction)
     }
 }
+
+// void updated_cell_based_movement(Cell cell)
+// {
+//     if (cell.walls.front && cell.walls.left && cell.walls.right)
+//     {
+//         (*backtrack) = 1; // backtrack enabled
+//         FA_BTSendString("Backtracking", 20);
+//         FA_Left(180);
+//     }
+//     else if (cell.walls.front && cell.walls.left)
+//     { // is a wall at the front and at the left
+//         FA_BTSendString("Turning right", 20);
+//         FA_Right(90); // turn 90 degrees at an intersection
+//     }
+//     else if (cell.walls.front && cell.walls.right)
+//     { // is a wall at the front and at the right
+//         FA_BTSendString("Turning left", 20);
+//         FA_Left(90); // turn 90 degrees at an intersection
+//     }
+//     else if (cell.walls.front)
+//     {
+//         FA_BTSendString("Turning right", 20);
+//         FA_Right(90); // turn 90 degrees right when there is something in front
+//     }
+// }
+
+// void is_intersection(Cell *cell) {
+//     if (cell->walls.)
+// }
 
 bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix)
 {
@@ -239,6 +323,9 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         int front = FA_ReadIR(IR_FRONT);
         int left = FA_ReadIR(IR_LEFT);
         int right = FA_ReadIR(IR_RIGHT);
+        int rear = FA_ReadIR(IR_REAR);
+
+        set_walls(front, right, left, rear, &maze->cells[*cell_num].walls);
 
         if (((front < 10 && left < 10) || (front < 10 && right < 10) || (left < 10 && right < 10)) && !maze->cells[*cell_num].is_intersection) // marks the cell as an intersection
         {
