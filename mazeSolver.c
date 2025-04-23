@@ -133,6 +133,21 @@ int read_line()
     return seen_line;
 }
 
+void adjust_robot(int right, int left)
+{
+    int difference = right - left;
+    FA_BTSendNumber(difference);
+    FA_BTSendString("\n", 4);
+    if (right > 400)
+    {
+        FA_Left(15); // Move slightly left to avoid right wall
+    }
+    else if (left > 400)
+    {
+        FA_Right(15);
+    }
+}
+
 void set_walls(int front, int right, int left, int rear, Walls *walls)
 {
     walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 4); // sets the front wall based on if front > obstacle threashold as it returns either true or false
@@ -174,6 +189,27 @@ void set_walls(int front, int right, int left, int rear, Walls *walls)
     }
 }
 
+void cell_to_grid(int direction, int *rows, int *columns)
+{
+    switch (direction)
+    {
+    case 0:
+        (*columns)++;
+        break;
+    case 1:
+        (*rows)++;
+        break;
+    case 2:
+        (*columns)--;
+        break;
+    case 3:
+        (*rows)--;
+        break;
+    default:
+        break;
+    }
+}
+
 /*
  * This function makes the robot stops 500ms after a line has been hit to stop
  * in the middle of the cell, for the robot to see what the next moves are
@@ -197,23 +233,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
 
     if (read_line() && !stopping && line_detect_time == 0)
     {
-        switch (robot->direction)
-        {
-        case 0:
-            (*columns)++;
-            break;
-        case 1:
-            (*rows)++;
-            break;
-        case 2:
-            (*columns)--;
-            break;
-        case 3:
-            (*rows)--;
-            break;
-        default:
-            break;
-        }
+        cell_to_grid(robot->direction, rows, columns);
         line_detect_time = FA_ClockMS();
     }
 
@@ -234,6 +254,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
     return false;
 }
 
+// remove this when submitting as it isn't needed
 char *get_facing(int direction)
 {
     switch (direction)
@@ -285,8 +306,12 @@ void set_direction(Robot *robot, int turn_type)
  * @param left for the left
  * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
  */
-void wall_based_movement(Cell cell, bool *backtrack, Robot *robot)
+void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot *robot)
 {
+    Cell cell = maze.cells[row][column];
+    int next_row = 0;
+    int next_column = 0;
+
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
         (*backtrack) = 1; // backtrack enabled
@@ -294,23 +319,44 @@ void wall_based_movement(Cell cell, bool *backtrack, Robot *robot)
         FA_Left(180);
         set_direction(robot, 3); // backtracking turn
     }
-    else if (!cell.walls.right) // if there are no walls on the right then turn righ
+    else
     {
-        FA_BTSendString("Turning right", 20);
-        FA_Right(90);
-        set_direction(robot, 1); // right turn
-    }
-    else if (!cell.walls.left) // if no walls on the left then turn left
-    {
-        FA_BTSendString("Turning left", 20);
-        FA_Left(90);
-        set_direction(robot, 2); // left turn
-    }
-    else if (cell.walls.front)
-    {
-        FA_BTSendString("Front obstacle", 20);
-        FA_Right(90); // turn 90 degrees right when there is something in front
-        set_direction(robot, 1);
+        if (!cell.walls.right) // if there are no walls on the right then turn righ
+        {
+            FA_BTSendString("Turning right", 20);
+            set_direction(robot, 1); // right turn
+            cell_to_grid(robot->direction, &next_row, &next_column);
+            if (!maze.cells[next_row][next_column].visited)
+            {
+                FA_Right(90);
+            }
+            else
+            {
+                FA_BTSendString("Cell already visited", 30);
+                set_direction(robot, 2); // turns left to get back to the start of that move
+            }
+        }
+        else if (!cell.walls.left) // if no walls on the left then turn left
+        {
+            FA_BTSendString("Turning left", 20);
+            set_direction(robot, 2); // left turn
+            cell_to_grid(robot->direction, &next_row, &next_column);
+            if (!maze.cells[next_row][next_column].visited)
+            {
+                FA_Left(90);
+            }
+            else
+            {
+                FA_BTSendString("Cell already visited", 30);
+                set_direction(robot, 1); // turns right to get back to the start of that move
+            }
+        }
+        else if (cell.walls.front)
+        {
+            FA_BTSendString("Front obstacle", 20);
+            FA_Right(90); // turn 90 degrees right when there is something in front
+            set_direction(robot, 1);
+        }
     }
 }
 
@@ -368,11 +414,13 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
+        adjust_robot(right, left); // adjusts once after every move (WHICH IS GOOD!)
+
         set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
         set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
 
-        wall_based_movement(maze->cells[*rows][*columns], backtrack, robot); // updates the movement of the cell
+        wall_based_movement(*maze, *rows, *columns, backtrack, robot); // updates the movement of the cell
     }
     return false;
 }
