@@ -127,42 +127,42 @@ int read_line()
 
 void set_walls(int front, int right, int left, int rear, Walls *walls)
 {
-    walls->front = (front < OBSTACLE_SENSOR_THRESHOLD); // sets the front wall based on if front < obstacle threashold as it returns either true or false
-    walls->right = (right < OBSTACLE_SENSOR_THRESHOLD);
-    walls->left = (left < OBSTACLE_SENSOR_THRESHOLD);
-    walls->rear = (rear < OBSTACLE_SENSOR_THRESHOLD);
+    walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 2); // sets the front wall based on if front < obstacle threashold as it returns either true or false
+    walls->right = (right > OBSTACLE_SENSOR_THRESHOLD / 2);
+    walls->left = (left > OBSTACLE_SENSOR_THRESHOLD / 2);
+    walls->rear = (rear > OBSTACLE_SENSOR_THRESHOLD / 2);
 
     if (walls->front == true)
     {
-        FA_BTSendString("F, ", 4);
+        FA_BTSendString("X, ", 4);
     }
     else
     {
-        FA_BTSendString("X, ", 4);
+        FA_BTSendString("F, ", 4);
     }
     if (walls->left == true)
     {
-        FA_BTSendString("L, ", 4);
+        FA_BTSendString("X, ", 4);
     }
     else
     {
-        FA_BTSendString("X, ", 4);
+        FA_BTSendString("L, ", 4);
     }
     if (walls->right == true)
     {
-        FA_BTSendString("R, ", 4);
-    }
-    else
-    {
         FA_BTSendString("X, ", 4);
     }
-    if (walls->front == true)
+    else
     {
-        FA_BTSendString("F, \n", 6);
+        FA_BTSendString("R, ", 4);
+    }
+    if (walls->rear == true)
+    {
+        FA_BTSendString("X, \n", 6);
     }
     else
     {
-        FA_BTSendString("X, \n", 6);
+        FA_BTSendString("B, \n", 6);
     }
 }
 
@@ -182,7 +182,6 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
     {
         FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
         motors_started = 1;
-        return true;
     }
 
     if (read_line() && !stopping && line_detect_time == 0)
@@ -270,15 +269,15 @@ void updated_cell_based_movement(Cell cell, bool *backtrack, Robot *robot)
         FA_BTSendString("Backtracking", 20);
         FA_Left(180);
     }
-    else if (cell.walls.front && cell.walls.left)
-    { // is a wall at the front and at the left
+    else if (!cell.walls.right) // if there are no walls on the right then turn righ
+    {
         FA_BTSendString("Turning right", 20);
-        FA_Right(90); // turn 90 degrees at an intersection
+        FA_Right(90);
     }
-    else if (cell.walls.front && cell.walls.right)
-    { // is a wall at the front and at the right
+    else if (!cell.walls.left) // if no walls on the left then turn left
+    {
         FA_BTSendString("Turning left", 20);
-        FA_Left(90); // turn 90 degrees at an intersection
+        FA_Left(90);
     }
     else if (cell.walls.front)
     {
@@ -311,6 +310,7 @@ void set_direction(Robot *robot, int turn_type)
         break;
     case 3:
         robot->direction = (robot->direction + 2) % 4; // turn around
+        break;
     default:
         break;
     }
@@ -426,6 +426,18 @@ void debug_turn()
     FA_LCDNumber(right_encoder, 90, 20, FONT_NORMAL, LCD_OPAQUE);
 }
 
+void debug_walls()
+{
+    Cell cell;
+
+    int front = FA_ReadIR(IR_FRONT);
+    int right = FA_ReadIR(IR_RIGHT);
+    int left = FA_ReadIR(IR_LEFT);
+    int rear = FA_ReadIR(IR_REAR);
+
+    set_walls(front, right, left, rear, &cell.walls);
+}
+
 int main(void)
 {
 
@@ -434,7 +446,7 @@ int main(void)
     Robot robot;
     robot.direction = 1;
 
-    while (!FA_BTConnected())
+    while (!FA_BTConnected()) // wait until bluetooth is connected
     {
     };
 
@@ -461,6 +473,8 @@ int main(void)
     {         // (this is equivalent to Arduino loop() function
         traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack, &start_fix, &robot);
         //        debug_IR();
+        // debug_walls();
+        // FA_DelayMillis(3000);
     }
     return 0; // Actually, we should never get here...
 }
