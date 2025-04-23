@@ -1,5 +1,5 @@
 /*
- * File:   recursiveMaze.c
+ * File:   mazeSolver.c
  * Author: harvi
  *
  * Created on 17 April 2025, 15:59
