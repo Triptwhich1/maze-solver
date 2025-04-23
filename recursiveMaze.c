@@ -17,6 +17,11 @@
 #define ENABLE_DEBUG_IR 1
 #define CELLS_IN_MAZE 25
 
+typedef struct Robot
+{
+    int direction; // N - 0, E - 1, S - 2, W - 3;
+} Robot;
+
 typedef struct Walls
 {
     bool left;
@@ -177,6 +182,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *cell_number, bool 
     {
         FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
         motors_started = 1;
+        return true;
     }
 
     if (read_line() && !stopping && line_detect_time == 0)
@@ -256,7 +262,7 @@ void movement(int front, int right, int left, int front_right, int front_left, b
     }
 }
 
-void updated_cell_based_movement(Cell cell, bool *backtrack)
+void updated_cell_based_movement(Cell cell, bool *backtrack, Robot *robot)
 {
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
@@ -281,26 +287,36 @@ void updated_cell_based_movement(Cell cell, bool *backtrack)
     }
 }
 
-void is_intersection(Cell *cell)
+void set_intersection(Cell *cell)
 {
     if (!cell->is_intersection)
     {
-        if (cell->walls.right && cell->walls.front && cell->walls.rear && !cell->walls.left) // cell with open right, open front, open rear
-        {
-            cell->is_intersection = true;
-        }
-        else if (cell->walls.left && cell->walls.front && cell->walls.rear && !cell->walls.right) // cell with open left, open front, open rear
-        {
-            cell->is_intersection = true;
-        }
-        else if (cell->walls.front && !cell->walls.left && !cell->walls.rear && !cell->walls.right) // cell with open right, left and rear
+        int open_paths = !cell->walls.front + !cell->walls.left + !cell->walls.right + !cell->walls.rear; // gets number of open paths
+        if (open_paths > 2)                                                                               // if it more than 2 then it indicates an intersection
         {
             cell->is_intersection = true;
         }
     }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix)
+void set_direction(Robot *robot, int turn_type)
+{
+    switch (turn_type)
+    {
+    case 1:
+        robot->direction = (robot->direction + 1) % 4; // right turn
+        break;
+    case 2:
+        robot->direction = (robot->direction + 3) % 4; // left turn
+        break;
+    case 3:
+        robot->direction = (robot->direction + 2) % 4; // turn around
+    default:
+        break;
+    }
+}
+
+bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, bool *backtrack, Stack *stack, bool *start_fix, Robot *robot)
 {
     if (maze->cells[*cell_num].is_intersection)
     {
@@ -347,9 +363,9 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, int *cell_num, b
         //     maze->cells[*cell_num].is_intersection = true;
         //     FA_BTSendString("Intersection found\n", 30);
         // }
-        is_intersection(&maze->cells[*cell_num]); // declares if cell is an intersection
+        set_intersection(&maze->cells[*cell_num]); // declares if cell is an intersection
 
-        updated_cell_based_movement(maze->cells[*cell_num], backtrack); // updates the movement of the cell
+        updated_cell_based_movement(maze->cells[*cell_num], backtrack, robot); // updates the movement of the cell
         // movement(front, right, left, backtrack);
     }
     return false;
@@ -415,11 +431,13 @@ int main(void)
 
     FA_RobotInit();
 
-    bool state = FA_BTConnected();
-    while (!state)
+    Robot robot;
+    robot.direction = 1;
+
+    while (!FA_BTConnected())
     {
-        state = FA_BTConnected();
-    }
+    };
+
     FA_BTSendNumber(10);
 
     FA_LCDBacklight(50);  // Switch on backlight (half brightness)
@@ -441,7 +459,7 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack, &start_fix);
+        traverse_maze(&pause_start_time, &maze, &cell_number, &backtrack, &stack, &start_fix, &robot);
         //        debug_IR();
     }
     return 0; // Actually, we should never get here...
