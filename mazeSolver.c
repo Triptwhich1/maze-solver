@@ -7,15 +7,11 @@
 
 #include "xc.h"
 #include "allcode_api.h"
+#include <stdbool.h>
 
-#define CELL_SIZE_CM 150
 #define MOTOR_SPEED_LEFT 30
 #define MOTOR_SPEED_RIGHT 30
 #define OBSTACLE_SENSOR_THRESHOLD 200
-#define MOTOR_OFFSET 20
-#define BACKWARDS_DISTANCE 20 // Distance to move backwards when avoiding an obstacle
-#define ENABLE_DEBUG_IR 1
-#define CELLS_IN_MAZE 25
 
 typedef struct Robot
 {
@@ -41,23 +37,17 @@ typedef struct Cell
 
 typedef struct Maze
 {
-    Cell cells[5][5]; // cells within the maze
+    Cell cells[7][7]; // cells within the maze (with offset to stop negative cells!)
     int shelter_pos;
     int food_pos;
     int water_pos;
 } Maze;
 
-typedef struct
-{
-    int items[CELLS_IN_MAZE];
-    int top;
-} Stack;
-
 void initialise_maze(Maze *maze)
 {
-    for (int r = 0; r < 5; r++)
+    for (int r = 0; r < 7; r++)
     {
-        for (int c = 0; c < 5; c++)
+        for (int c = 0; c < 7; c++)
         {
             maze->cells[r][c].visited = 0; // unvisited
             maze->cells[r][c].is_intersection = false;
@@ -73,40 +63,6 @@ void initialise_maze(Maze *maze)
     }
 }
 
-// void initialise_stack(Stack *stack)
-// {
-//     stack->top = -1; // empty stack
-// }
-
-// void push(Stack *stack, int item)
-// {
-//     if (stack->top < CELLS_IN_MAZE - 1) // checks for stack overflow
-//     {
-//         stack->top++;
-//         stack->items[stack->top] = item;
-//     }
-// }
-
-// int pop(Stack *stack)
-// {
-//     if (stack->top >= 0)
-//     {
-//         int item = stack->items[stack->top];
-//         stack->top--;
-//         return item;
-//     }
-//     else
-//     {
-//         return -1; // Return an invalid value to indicate the stack is empty
-//     }
-// }
-
-// int size(Stack *stack)
-// {
-//     return stack->top + 1;
-// }
-// /* Left wheel keeps messing up, so this is here to fix that hopefully.
-//  */
 void adjust_wheel_encoders()
 {
     int left_encoder = FA_ReadEncoder(0);
@@ -135,16 +91,13 @@ int read_line()
 
 void adjust_robot(int right, int left)
 {
-    int difference = right - left;
-    FA_BTSendNumber(difference);
-    FA_BTSendString("\n", 4);
-    if (right > 400)
+    if (right > 600) // was too sensitive now not as sensitive
     {
-        FA_Left(15); // Move slightly left to avoid right wall
+        FA_Left(5); // Move slightly left to avoid right wall
     }
-    else if (left > 400)
+    else if (left > 600)
     {
-        FA_Right(15);
+        FA_Right(5); // Move slightly right to avoid left wall
     }
 }
 
@@ -225,28 +178,28 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
     static int number_of_lines = 0;
     static unsigned long line_detect_time = 0;
 
-    if (!motors_started && !stopping)
+    if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
     {
         FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
         motors_started = 1;
     }
 
-    if (read_line() && !stopping && line_detect_time == 0)
+    if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line that has been read hasn't been detected recently
     {
         cell_to_grid(robot->direction, rows, columns);
         line_detect_time = FA_ClockMS();
     }
 
-    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 500 && !stopping)
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 500 && !stopping) // pauses the robot after a line has been detected
     {
-        *pause_start_time = FA_ClockMS();
-        FA_SetMotors(0, 0);
+        *pause_start_time = FA_ClockMS(); // gets the time when the pause started
+        FA_SetMotors(0, 0);               // actually stops the robot
         motors_started = 0;
-        stopping = 1;
+        stopping = 1; // puts the robot in a stopping state
         line_detect_time = 0;
     }
 
-    if (stopping && FA_ClockMS() - *pause_start_time >= 500) // Stops the robot after the line has been seen, this stops it for 500ms to get correct sensor readings
+    if (stopping && FA_ClockMS() - *pause_start_time >= 500) // checks if robot has been stopped for a long enough time i.e. 500ms
     {
         stopping = 0;
         return true; // finished stopping
@@ -311,6 +264,7 @@ void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot 
     Cell cell = maze.cells[row][column];
     int next_row = 0;
     int next_column = 0;
+    bool visited = false;
 
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
@@ -323,39 +277,46 @@ void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot 
     {
         if (!cell.walls.right) // if there are no walls on the right then turn righ
         {
-            FA_BTSendString("Turning right", 20);
-            set_direction(robot, 1); // right turn
-            cell_to_grid(robot->direction, &next_row, &next_column);
-            if (!maze.cells[next_row][next_column].visited)
+            FA_BTSendString("Turning right\n", 20);
+            next_row = row;
+            next_column = column;
+            cell_to_grid((robot->direction + 1) % 4, &next_row, &next_column); // calculate next cell as if robot turned right
+            if (!maze.cells[next_row][next_column].visited || *backtrack)
             {
                 FA_Right(90);
+                set_direction(robot, 1); // right turn
             }
             else
             {
-                FA_BTSendString("Cell already visited", 30);
-                set_direction(robot, 2); // turns left to get back to the start of that move
+                FA_BTSendString("Cell to the right is visited\n", 30);
             }
         }
         else if (!cell.walls.left) // if no walls on the left then turn left
         {
-            FA_BTSendString("Turning left", 20);
-            set_direction(robot, 2); // left turn
-            cell_to_grid(robot->direction, &next_row, &next_column);
-            if (!maze.cells[next_row][next_column].visited)
+            FA_BTSendString("Turning left\n", 20);
+            next_row = row;
+            next_column = column;
+            cell_to_grid((robot->direction + 3) % 4, &next_row, &next_column); // calculate next cell as if robot turned left
+            if (!maze.cells[next_row][next_column].visited || *backtrack)
             {
                 FA_Left(90);
+                set_direction(robot, 2); // left turn
             }
             else
             {
-                FA_BTSendString("Cell already visited", 30);
-                set_direction(robot, 1); // turns right to get back to the start of that move
+                FA_BTSendString("Cell to the left is visited\n", 30);
             }
         }
-        else if (cell.walls.front)
+        else
         {
-            FA_BTSendString("Front obstacle", 20);
-            FA_Right(90); // turn 90 degrees right when there is something in front
-            set_direction(robot, 1);
+            next_row = row;
+            next_column = column;
+            cell_to_grid(robot->direction, &next_row, &next_column); // gets the unvisited next cell
+            if (!maze.cells[next_row][next_column].visited || *backtrack)
+            {
+                FA_BTSendString("Maze is probably done\n", 30);
+            }
+            FA_BTSendString("Continuing forward to unvisited cell\n", 30);
         }
     }
 }
@@ -372,7 +333,7 @@ void set_intersection(Cell *cell)
     }
 }
 
-bool traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack, bool *start_fix, Robot *robot, int *rows, int *columns)
+void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack, bool *start_fix, Robot *robot, int *rows, int *columns)
 {
     if (maze->cells[*rows][*columns].is_intersection)
     {
@@ -388,14 +349,7 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         maze->cells[*rows][*columns].visited = 1;
     }
 
-    if (FA_ReadIR(IR_FRONT) > 200 && !(*start_fix))
-    {
-        (*start_fix) = true; // fix now applied
-        FA_Right(90);        // specific weird edge case for starting in a spot where the robot needs to be rotated
-        FA_BTSendString("Fix happened\n", 30);
-    }
-
-    if (stop_when_line_hit(pause_start_time, rows, columns, backtrack, robot))
+    if (stop_when_line_hit(pause_start_time, rows, columns, backtrack, robot)) // once robot has stopped for long enough = true
     {
         (*start_fix) = true; // didn't need fixing
 
@@ -422,7 +376,6 @@ bool traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
 
         wall_based_movement(*maze, *rows, *columns, backtrack, robot); // updates the movement of the cell
     }
-    return false;
 }
 
 void debug_line_sensors()
@@ -513,8 +466,8 @@ int main(void)
     Maze maze;
     initialise_maze(&maze); // Initialises Maze
 
-    int rows = 0;
-    int columns = 0;
+    int rows = 2; // adds an offset of 2 to the columns/rows because there are minus numbers which are bad.
+    int columns = 2;
 
     bool backtrack = false;
     bool start_fix = false;
