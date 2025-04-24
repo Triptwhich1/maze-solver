@@ -89,24 +89,20 @@ int read_line()
     return seen_line;
 }
 
-void adjust_robot(int right, int left)
+void adjust_for_wall()
 {
-    if (right > 600) // was too sensitive now not as sensitive
-    {
-        FA_Left(5); // Move slightly left to avoid right wall
-    }
-    else if (left > 600)
-    {
-        FA_Right(5); // Move slightly right to avoid left wall
-    }
+    int front_left = FA_ReadIR(IR_FRONT_LEFT);
+    int front_right = FA_ReadIR(IR_FRONT_RIGHT);
+    int left = FA_ReadIR(IR_LEFT);
+    int right = FA_ReadIR(IR_RIGHT);
 }
 
 void set_walls(int front, int right, int left, int rear, Walls *walls)
 {
-    walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 4); // sets the front wall based on if front > obstacle threashold as it returns either true or false
-    walls->right = (right > OBSTACLE_SENSOR_THRESHOLD / 4);
-    walls->left = (left > OBSTACLE_SENSOR_THRESHOLD / 4);
-    walls->rear = (rear > OBSTACLE_SENSOR_THRESHOLD / 4);
+    walls->front = (front > OBSTACLE_SENSOR_THRESHOLD / 5); // sets the front wall based on if front > obstacle threashold as it returns either true or false
+    walls->right = (right > OBSTACLE_SENSOR_THRESHOLD / 5);
+    walls->left = (left > OBSTACLE_SENSOR_THRESHOLD / 5);
+    walls->rear = (rear > OBSTACLE_SENSOR_THRESHOLD / 5);
 
     if (walls->front == true)
     {
@@ -184,7 +180,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         motors_started = 1;
     }
 
-    if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line that has been read hasn't been detected recently
+    if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line hasn't been detected recently
     {
         cell_to_grid(robot->direction, rows, columns);
         line_detect_time = FA_ClockMS();
@@ -368,8 +364,6 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
-        adjust_robot(right, left); // adjusts once after every move (WHICH IS GOOD!)
-
         set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
         set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
@@ -389,14 +383,23 @@ void debug_line_sensors()
 void debug_IR()
 {
     FA_LCDClear();
-    FA_LCDNumber(FA_ReadIR(IR_FRONT_LEFT), 30, 20, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_FRONT), 60, 20, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_FRONT_RIGHT), 90, 20, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_RIGHT), 30, 12, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_REAR_RIGHT), 90, 4, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_REAR), 60, 4, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_REAR_LEFT), 30, 4, FONT_NORMAL, LCD_OPAQUE);
-    FA_LCDNumber(FA_ReadIR(IR_LEFT), 90, 12, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_FRONT_LEFT), 30, 20, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_FRONT), 60, 20, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_FRONT_RIGHT), 90, 20, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_RIGHT), 30, 12, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_REAR_RIGHT), 90, 4, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_REAR), 60, 4, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_REAR_LEFT), 30, 4, FONT_NORMAL, LCD_OPAQUE);
+    // FA_LCDNumber(FA_ReadIR(IR_LEFT), 90, 12, FONT_NORMAL, LCD_OPAQUE);
+
+    FA_BTSendString("Front left", 20);
+    FA_BTSendNumber(FA_ReadIR(IR_FRONT_LEFT));
+    FA_BTSendString("\n", 5);
+
+    FA_BTSendString("Front Right", 20);
+    FA_BTSendNumber(FA_ReadIR(IR_FRONT_RIGHT));
+    FA_BTSendString("\n", 5);
+
     FA_DelayMillis(2000);
 }
 
@@ -478,9 +481,6 @@ int main(void)
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
         traverse_maze(&pause_start_time, &maze, &backtrack, &start_fix, &robot, &rows, &columns);
-        //        debug_IR();
-        // debug_walls();
-        // FA_DelayMillis(3000);
     }
     return 0; // Actually, we should never get here...
 }
