@@ -162,22 +162,26 @@ void cell_to_grid(int direction, int *rows, int *columns)
 /*
  * This function makes the robot stops 500ms after a line has been hit to stop
  * in the middle of the cell, for the robot to see what the next moves are
- * @param pause_start_time pointer to when the pause started
- * @param cell_number current cell number that the robot is on
- * @param backtrack flag for when backtracking is or isn't in progress
- * @param stack that the route is being added to
+ * @param *pause_start_time pointer to when the pause_starts
+ * @param *rows pointer to rows passed in
+ * @param *columns pointer to the columns passed in
+ * @param *backtrack backtrack flag for when the robot needs to backtrack to get to unexplored cells
+ * @param *robot robot passed in, gives access to direction of the robot
  */
 bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns, bool *backtrack, Robot *robot)
 {
-    static int motors_started = 0;
-    static int stopping = 0;
-    static int number_of_lines = 0;
-    static unsigned long line_detect_time = 0;
+    static int motors_started = 0;             // motors started flag
+    static int stopping = 0;                   // stopping flag
+    static unsigned long line_detect_time = 0; // ms passed since a line has been detected
 
     if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
     {
-        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
-        motors_started = 1;
+        if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD / 4) // specific edge case where robot starts facing a wall
+        {
+            FA_Right(90); // turns right
+        }
+        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT); // motor then starts
+        motors_started = 1;                                // started flag now positive
     }
 
     if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line hasn't been detected recently
@@ -191,7 +195,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         *pause_start_time = FA_ClockMS(); // gets the time when the pause started
         FA_SetMotors(0, 0);               // actually stops the robot
         motors_started = 0;
-        stopping = 1; // puts the robot in a stopping state
+        stopping = 1; // puts the robot in a stopped state
         line_detect_time = 0;
     }
 
@@ -221,6 +225,12 @@ char *get_facing(int direction)
     }
 }
 
+/*
+ * Sets the direction of the robot after a turn has been made
+ * @param *robot pointer to robot to update the direction after a turn has been made
+ * @param turn_type is the type of turn taken, i.e. 1 is a right turn meaning that the direction is incremented once
+ *        north -> east etc.
+ */
 void set_direction(Robot *robot, int turn_type)
 {
     switch (turn_type)
@@ -249,11 +259,15 @@ void set_direction(Robot *robot, int turn_type)
 }
 
 /*
- * This function makes the robot move either right, left or start backtracking based on how many walls surround the current cell
- * @param front sensor value for the front
- * @param right for the right
- * @param left for the left
- * @param *backtrack pointer to backtrack so the value can be changed after a dead end has been reached
+ * This function allows the robot to move based on the amount of walls surrounding it and
+ * allows for the prediction of the next cell that the robot is going to go into, to make sure
+ * it doesn't visit already visited cells
+ * @param maze passed in maze to get the current cell that the robot is in
+ * @param row gets the cell that the robot is currently in, and to predict the next cell the robot will be in
+ * @param column same as row
+ * @param *backtrack backtracking flag, when robot meets a dead end it can go into cells that it has already
+ *        visited before
+ * @param *robot pointer to the robot, allows for the direction to updated if the robot can go into the predicted cell
  */
 void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot *robot)
 {
@@ -317,6 +331,11 @@ void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot 
     }
 }
 
+/*
+ * This function sets the current cell as an intersection based on the amount of empty spaces surrounding the cell. If there is
+ * more than two then the cell is an intersection, used for stopping backtracking in traverse_maze()
+ * @param Cell *cell, pointer to the current cell and updates the is_intersection variable with true if it is an intersection
+ */
 void set_intersection(Cell *cell)
 {
     if (!cell->is_intersection)
@@ -329,7 +348,16 @@ void set_intersection(Cell *cell)
     }
 }
 
-void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack, bool *start_fix, Robot *robot, int *rows, int *columns)
+/*
+ * Main function to traverse the maze.
+ * @param *pause_start_time pointer to when the robot last paused
+ * @param *maze pointer to the initialised maze in the main function, allows for maze cells to be changed
+ * @param *backtrack backtrack flag, changes when the robot encounters a previously marked intersection
+ * @param *robot passes pointer of robot to stop_when_line_hit()
+ * @param *rows pointer to current row
+ * @param *columns pointer to current row
+ */
+void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack, Robot *robot, int *rows, int *columns)
 {
     if (maze->cells[*rows][*columns].is_intersection)
     {
@@ -347,7 +375,6 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
 
     if (stop_when_line_hit(pause_start_time, rows, columns, backtrack, robot)) // once robot has stopped for long enough = true
     {
-        (*start_fix) = true; // didn't need fixing
 
         FA_BTSendString("row: ", 10);
         FA_BTSendNumber(*rows);
@@ -356,8 +383,6 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         FA_BTSendString("column: ", 10);
         FA_BTSendNumber(*columns);
         FA_BTSendString("\n", 4);
-
-        adjust_wheel_encoders();
 
         int front = FA_ReadIR(IR_FRONT);
         int left = FA_ReadIR(IR_LEFT);
@@ -466,6 +491,7 @@ int main(void)
     FA_DelayMillis(2000); // Pause 2 secs
 
     unsigned long pause_start_time = 0;
+
     Maze maze;
     initialise_maze(&maze); // Initialises Maze
 
@@ -473,7 +499,6 @@ int main(void)
     int columns = 2;
 
     bool backtrack = false;
-    bool start_fix = false;
 
     // int motor_l = MOTOR_SPEED_LEFT;
     // int motor_r = MOTOR_SPEED_RIGHT;
