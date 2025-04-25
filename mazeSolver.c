@@ -88,26 +88,65 @@ void adjust_using_wheel_encoders()
     }
 }
 
-bool set_as_food(Maze *maze, int rows, int columns)
-{
-    int lines_read = 0;
-
-    maze->food_pos[rows][columns];
-}
-
-int read_line()
+int read_line(int option)
 {
     static unsigned long last_time = 0;
-    int seen_line = 0;
+    static unsigned long start_time = 0;
+    static int seen_line;
+    static bool line_detected = false;
+    static int line_count = 0;
     unsigned long current_time = FA_ClockMS();
 
     int left_line = FA_ReadLine(0);
     int right_line = FA_ReadLine(1);
 
-    if ((left_line < 100 && right_line < 100) && (current_time - last_time > 200)) // reads a lines every 200ms
+    switch (option)
     {
-        last_time = current_time;
-        seen_line = 1;
+    case 0:
+        seen_line = 0;                                                                 // normal line reading functionality for cells and such
+        if ((left_line < 100 && right_line < 100) && (current_time - last_time > 200)) // reads a lines every 200ms
+        {
+            last_time = current_time;
+            seen_line = 1;
+        }
+        break;
+    case 1: // multiple lines are detected shortly after the first line
+        if (left_line < 100 && right_line < 100)
+        {
+            if (!line_detected)
+            {
+                start_time = current_time;
+                line_detected = true;
+            }
+        }
+        else if (line_detected)
+        {
+            if (current_time - start_time >= 50)
+            {
+                line_count++;
+                line_detected = false;
+
+                if (current_time - last_time > 500)
+                {
+                    line_count = 1;
+                }
+
+                last_time = current_time;
+
+                if (line_count == 2)
+                {
+                    seen_line = 2; // Double line (water)
+                }
+                else if (line_count >= 3)
+                {
+                    seen_line = 3;
+                    line_count = 0;
+                }
+            }
+        }
+        break;
+    default:
+        break;
     }
     return seen_line;
 }
@@ -182,54 +221,6 @@ void cell_to_grid(int direction, int *rows, int *columns)
     }
 }
 
-/*
- * This function makes the robot stops 500ms after a line has been hit to stop
- * in the middle of the cell, for the robot to see what the next moves are
- * @param *pause_start_time pointer to when the pause_starts
- * @param *rows pointer to rows passed in
- * @param *columns pointer to the columns passed in
- * @param *backtrack backtrack flag for when the robot needs to backtrack to get to unexplored cells
- * @param *robot robot passed in, gives access to direction of the robot
- */
-bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns, bool *backtrack, Robot *robot)
-{
-    static int motors_started = 0;             // motors started flag
-    static int stopping = 0;                   // stopping flag
-    static unsigned long line_detect_time = 0; // ms passed since a line has been detected
-
-    if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
-    {
-        if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD / 4) // specific edge case where robot starts facing a wall
-        {
-            FA_Right(90); // turns right
-        }
-        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT); // motor then starts
-        motors_started = 1;                                // started flag now positive
-    }
-
-    if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line hasn't been detected recently
-    {
-        cell_to_grid(robot->direction, rows, columns);
-        line_detect_time = FA_ClockMS();
-    }
-
-    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 500 && !stopping) // pauses the robot after a line has been detected
-    {
-        *pause_start_time = FA_ClockMS(); // gets the time when the pause started
-        FA_SetMotors(0, 0);               // actually stops the robot
-        motors_started = 0;
-        stopping = 1; // puts the robot in a stopped state
-        line_detect_time = 0;
-    }
-
-    if (stopping && FA_ClockMS() - *pause_start_time >= 500) // checks if robot has been stopped for a long enough time i.e. 500ms
-    {
-        stopping = 0;
-        return true; // finished stopping
-    }
-    return false;
-}
-
 // remove this when submitting as it isn't needed
 char *get_facing(int direction)
 {
@@ -279,6 +270,105 @@ void set_direction(Robot *robot, int turn_type)
     default:
         break;
     }
+}
+
+void get_number_of_lines_seen()
+{
+    int l_line = FA_ReadLine(0);
+    int r_line = FA_ReadLine(1);
+    unsigned long start_time = 0;
+    unsigned long current_time = FA_ClockMS();
+    int line_count = 0;
+
+    unsigned long line_timeout = current_time + 1000; // 2 second timeout
+    bool looking_for_line = true;
+
+    while (looking_for_line && (FA_ClockMS() < line_timeout))
+    {
+        l_line = FA_ReadLine(0);
+        r_line = FA_ReadLine(1);
+
+        if (l_line > 100 && r_line > 100)
+        {
+            FA_BTSendString("Gap detected\n", 20);
+
+            // Now wait for next line
+            unsigned long gap_timeout = FA_ClockMS() + 500;
+            while (FA_ClockMS() < gap_timeout)
+            {
+                l_line = FA_ReadLine(0);
+                r_line = FA_ReadLine(1);
+
+                if (l_line < 100 && r_line < 100)
+                {
+                    line_count++;
+                    FA_BTSendString("Additional line detected\n", 30);
+                    break;
+                }
+                FA_DelayMillis(10);
+            }
+
+            if (FA_ClockMS() >= gap_timeout)
+            {
+                looking_for_line = false;
+            }
+        }
+    }
+    FA_DelayMillis(10);
+
+    FA_BTSendString("Total lines detected: ", 22);
+    FA_BTSendNumber(line_count);
+    FA_BTSendString("\n", 2);
+    return line_count;
+}
+
+/*
+ * This function makes the robot stops 500ms after a line has been hit to stop
+ * in the middle of the cell, for the robot to see what the next moves are
+ * @param *pause_start_time pointer to when the pause_starts
+ * @param *rows pointer to rows passed in
+ * @param *columns pointer to the columns passed in
+ * @param *backtrack backtrack flag for when the robot needs to backtrack to get to unexplored cells
+ * @param *robot robot passed in, gives access to direction of the robot
+ */
+bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns, bool *backtrack, Robot *robot)
+{
+    static int motors_started = 0;             // motors started flag
+    static int stopping = 0;                   // stopping flag
+    static unsigned long line_detect_time = 0; // ms passed since a line has been detected
+
+    if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
+    {
+        if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD / 4) // specific edge case where robot starts facing a wall
+        {
+            FA_Right(90);            // turns right
+            set_direction(robot, 1); // updates where the robot is facing
+        }
+        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT); // motor then starts
+        motors_started = 1;                                // started flag now positive
+    }
+
+    if (read_line(0) && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line hasn't been detected recently
+    {
+        cell_to_grid(robot->direction, rows, columns);
+        line_detect_time = FA_ClockMS();
+    }
+
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 500 && !stopping) // pauses the robot after a line has been detected
+    {
+        *pause_start_time = FA_ClockMS(); // gets the time when the pause started
+        FA_SetMotors(0, 0);               // actually stops the robot
+        motors_started = 0;
+        stopping = 1; // puts the robot in a stopped state
+        line_detect_time = 0;
+    }
+
+    if (stopping && FA_ClockMS() - *pause_start_time >= 500) // checks if robot has been stopped for a long enough time i.e. 500ms
+    {
+        stopping = 0;
+        return true; // finished stopping
+    }
+    return false;
 }
 
 /*
@@ -447,6 +537,10 @@ void debug_IR()
     FA_BTSendString("\n", 5);
 
     FA_BTSendString("Front Right", 20);
+    FA_BTSendNumber(FA_ReadIR(IR_FRONT));
+    FA_BTSendString("\n", 5);
+
+    FA_BTSendString("Front Right", 20);
     FA_BTSendNumber(FA_ReadIR(IR_FRONT_RIGHT));
     FA_BTSendString("\n", 5);
 
@@ -531,6 +625,10 @@ int main(void)
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
         traverse_maze(&pause_start_time, &maze, &backtrack, &robot, &rows, &columns);
+        // debug_line_sensors();
+        //        debug_food_sensors();
+
+        // debug_IR();
     }
     return 0; // Actually, we should never get here...
 }
