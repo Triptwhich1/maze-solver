@@ -88,13 +88,6 @@ void adjust_using_wheel_encoders()
     }
 }
 
-bool set_as_food(Maze *maze, int rows, int columns)
-{
-    int lines_read = 0;
-
-    maze->food_pos[rows][columns];
-}
-
 int read_line()
 {
     static unsigned long last_time = 0;
