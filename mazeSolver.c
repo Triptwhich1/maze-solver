@@ -63,16 +63,36 @@ void initialise_maze(Maze *maze)
     }
 }
 
-void adjust_wheel_encoders()
+void adjust_using_wheel_encoders()
 {
     int left_encoder = FA_ReadEncoder(0);
     int right_encoder = FA_ReadEncoder(1);
 
-    int difference = left_encoder - right_encoder;
-    if (difference > 15)
+    while (left_encoder > right_encoder + 30 || right_encoder > left_encoder + 30)
     {
-        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT);
+        if (left_encoder > right_encoder)
+        {
+            FA_SetMotors(0, 5);
+            FA_Forwards(15); // parallel parking type shit
+            FA_SetMotors(5, 0);
+        }
+        else if (right_encoder > left_encoder)
+        {
+            FA_SetMotors(5, 0);
+            FA_Forwards(15);
+            FA_SetMotors(0, 5);
+        }
+
+        left_encoder = FA_ReadEncoder(0);
+        right_encoder = FA_ReadEncoder(1);
     }
+}
+
+bool set_as_food(Maze *maze, int rows, int columns)
+{
+    int lines_read = 0;
+
+    maze->food_pos[rows][columns];
 }
 
 int read_line()
@@ -81,7 +101,10 @@ int read_line()
     int seen_line = 0;
     unsigned long current_time = FA_ClockMS();
 
-    if ((FA_ReadLine(0) < 100 && FA_ReadLine(1) < 100) && (current_time - last_time > 200))
+    int left_line = FA_ReadLine(0);
+    int right_line = FA_ReadLine(1);
+
+    if ((left_line < 100 && right_line < 100) && (current_time - last_time > 200)) // reads a lines every 200ms
     {
         last_time = current_time;
         seen_line = 1;
@@ -389,6 +412,8 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
+        adjust_using_wheel_encoders();
+
         set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
         set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
@@ -505,7 +530,7 @@ int main(void)
 
     while (1) // Execute this loop as long as robot is running
     {         // (this is equivalent to Arduino loop() function
-        traverse_maze(&pause_start_time, &maze, &backtrack, &start_fix, &robot, &rows, &columns);
+        traverse_maze(&pause_start_time, &maze, &backtrack, &robot, &rows, &columns);
     }
     return 0; // Actually, we should never get here...
 }
