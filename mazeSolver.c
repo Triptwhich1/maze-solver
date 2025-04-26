@@ -111,6 +111,18 @@ void adjust_for_wall()
     int front_right = FA_ReadIR(IR_FRONT_RIGHT);
     int left = FA_ReadIR(IR_LEFT);
     int right = FA_ReadIR(IR_RIGHT);
+
+    if (left > 400 || right > 400)
+    {
+        if (left > right)
+        {
+            FA_Right(3);
+        }
+        else
+        {
+            FA_Left(3);
+        }
+    }
 }
 
 void set_walls(int front, int right, int left, int rear, Walls *walls)
@@ -206,7 +218,11 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         line_detect_time = FA_ClockMS();
     }
 
-    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 500 && !stopping) // pauses the robot after a line has been detected
+    if (line_detect_time >= 150 && !stopping)
+    { // 250ms after the line has been detected
+    }
+
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 600 && !stopping) // pauses the robot after a line has been detected
     {
         *pause_start_time = FA_ClockMS(); // gets the time when the pause started
         FA_SetMotors(0, 0);               // actually stops the robot
@@ -215,7 +231,12 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         line_detect_time = 0;
     }
 
-    if (stopping && FA_ClockMS() - *pause_start_time >= 500) // checks if robot has been stopped for a long enough time i.e. 500ms
+    if (stopping && FA_ClockMS() - *pause_start_time < 1000) // whilst the robot has been stopped adjust itself
+    {
+        adjust_for_wall();
+    }
+
+    if (stopping && FA_ClockMS() - *pause_start_time >= 1000) // checks if robot has been stopped for a long enough time i.e. 500ms
     {
         stopping = 0;
         return true; // finished stopping
