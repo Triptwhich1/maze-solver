@@ -7,41 +7,13 @@
 
 #include "xc.h"
 #include "allcode_api.h"
+#include "mazeMapper.h"
+#include "mazeSolver.h"
 #include <stdbool.h>
 
 #define MOTOR_SPEED_LEFT 30
 #define MOTOR_SPEED_RIGHT 30
 #define OBSTACLE_SENSOR_THRESHOLD 200
-
-typedef struct Robot
-{
-    int direction; // N - 0, E - 1, S - 2, W - 3;
-} Robot;
-
-typedef struct Walls
-{
-    bool left;
-    bool right;
-    bool front;
-    bool rear;
-} Walls;
-
-typedef struct Cell
-{
-    int visited;
-    int x;
-    int y;
-    Walls walls;
-    bool is_intersection;
-} Cell;
-
-typedef struct Maze
-{
-    Cell cells[7][7]; // cells within the maze (with offset to stop negative cells!)
-    int shelter_pos;
-    int food_pos;
-    int water_pos;
-} Maze;
 
 void initialise_maze(Maze *maze)
 {
@@ -60,31 +32,6 @@ void initialise_maze(Maze *maze)
             maze->cells[r][c].walls.right = false;
             maze->cells[r][c].walls.rear = false;
         }
-    }
-}
-
-void adjust_using_wheel_encoders()
-{
-    int left_encoder = FA_ReadEncoder(0);
-    int right_encoder = FA_ReadEncoder(1);
-
-    while (left_encoder > right_encoder + 30 || right_encoder > left_encoder + 30)
-    {
-        if (left_encoder > right_encoder)
-        {
-            FA_SetMotors(0, 5);
-            FA_Forwards(15); // parallel parking type shit
-            FA_SetMotors(5, 0);
-        }
-        else if (right_encoder > left_encoder)
-        {
-            FA_SetMotors(5, 0);
-            FA_Forwards(15);
-            FA_SetMotors(0, 5);
-        }
-
-        left_encoder = FA_ReadEncoder(0);
-        right_encoder = FA_ReadEncoder(1);
     }
 }
 
@@ -107,12 +54,11 @@ int read_line()
 
 void adjust_for_wall()
 {
-    int front_left = FA_ReadIR(IR_FRONT_LEFT);
-    int front_right = FA_ReadIR(IR_FRONT_RIGHT);
+    int front = FA_ReadIR(IR_FRONT);
     int left = FA_ReadIR(IR_LEFT);
     int right = FA_ReadIR(IR_RIGHT);
 
-    if (left > 400 || right > 400)
+    if (left > 400 || right > 400) // if either sensor is above 400 then it adjusts
     {
         if (left > right)
         {
@@ -122,6 +68,10 @@ void adjust_for_wall()
         {
             FA_Left(3);
         }
+    }
+    if (front > 400) // until ir front isn't over 400 it reverses
+    {
+        FA_Backwards(3);
     }
 }
 
@@ -201,6 +151,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
     static int motors_started = 0;             // motors started flag
     static int stopping = 0;                   // stopping flag
     static unsigned long line_detect_time = 0; // ms passed since a line has been detected
+    static unsigned long additional_line_detect_time = 0;
 
     if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
     {
@@ -218,8 +169,24 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         line_detect_time = FA_ClockMS();
     }
 
-    if (line_detect_time >= 150 && !stopping)
-    { // 250ms after the line has been detected
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 200 && !stopping) // if after 200 ms whilst its not stopped
+    {
+        if (FA_ReadLine(0) < 100 && FA_ReadLine(1) < 100) // if the other line is detected
+        {
+            additional_line_detect_time = FA_ClockMS();                                               // gets the time an additional line was detected
+            if (additional_line_detect_time != 0 && FA_ClockMS() - additional_line_detect_time >= 20) // looks for new lines every 20ms
+            {
+                FA_BTSendString("IN A SPECICAL CELL!\n", 30);
+                if (FA_ReadLine(0) < 100 && FA_ReadLine(1) < 100 && FA_ClockMS - additional_line_detect_time >= 100) // another line has been detected
+                {
+                    FA_BTSendString("ANOTHER LINE DETECTED\n", 30);
+                }
+            }
+        }
+        else if (FA_ReadLine(0) > 100 && FA_ReadLine(1) > 100 && FA_ClockMS() - additional_line_detect_time >= 20)
+        {
+            FA_BTSendString("GAP DETECTED\n", 30);
+        }
     }
 
     if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 600 && !stopping) // pauses the robot after a line has been detected
@@ -311,7 +278,6 @@ void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot 
     Cell cell = maze.cells[row][column];
     int next_row = 0;
     int next_column = 0;
-    bool visited = false;
 
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
@@ -399,7 +365,7 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
     if (maze->cells[*rows][*columns].is_intersection)
     {
         if (*backtrack)
-        { // when backtracking isn't true just skip this
+        {
             FA_BTSendString("Back at an intersection again\n", 30);
             (*backtrack) = false; // backtracking is completed now that it is in an intersection again
         }
@@ -426,8 +392,6 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
-        adjust_using_wheel_encoders();
-
         set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
         set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
@@ -447,14 +411,6 @@ void debug_line_sensors()
 void debug_IR()
 {
     FA_LCDClear();
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT_LEFT), 30, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT), 60, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT_RIGHT), 90, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_RIGHT), 30, 12, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR_RIGHT), 90, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR), 60, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR_LEFT), 30, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_LEFT), 90, 12, FONT_NORMAL, LCD_OPAQUE);
 
     FA_BTSendString("Front left", 20);
     FA_BTSendNumber(FA_ReadIR(IR_FRONT_LEFT));
@@ -523,8 +479,6 @@ int main(void)
     while (!FA_BTConnected()) // wait until bluetooth is connected
     {
     };
-
-    FA_BTSendNumber(10);
 
     FA_LCDBacklight(50);  // Switch on backlight (half brightness)
     FA_DelayMillis(2000); // Pause 2 secs
