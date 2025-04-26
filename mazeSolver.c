@@ -7,41 +7,13 @@
 
 #include "xc.h"
 #include "allcode_api.h"
+#include "mazeMapper.h"
+#include "mazeSolver.h"
 #include <stdbool.h>
 
 #define MOTOR_SPEED_LEFT 30
 #define MOTOR_SPEED_RIGHT 30
 #define OBSTACLE_SENSOR_THRESHOLD 200
-
-typedef struct Robot
-{
-    int direction; // N - 0, E - 1, S - 2, W - 3;
-} Robot;
-
-typedef struct Walls
-{
-    bool left;
-    bool right;
-    bool front;
-    bool rear;
-} Walls;
-
-typedef struct Cell
-{
-    int visited;
-    int x;
-    int y;
-    Walls walls;
-    bool is_intersection;
-} Cell;
-
-typedef struct Maze
-{
-    Cell cells[7][7]; // cells within the maze (with offset to stop negative cells!)
-    int shelter_pos;
-    int food_pos;
-    int water_pos;
-} Maze;
 
 void initialise_maze(Maze *maze)
 {
@@ -63,32 +35,7 @@ void initialise_maze(Maze *maze)
     }
 }
 
-void adjust_using_wheel_encoders()
-{
-    int left_encoder = FA_ReadEncoder(0);
-    int right_encoder = FA_ReadEncoder(1);
-
-    while (left_encoder > right_encoder + 30 || right_encoder > left_encoder + 30)
-    {
-        if (left_encoder > right_encoder)
-        {
-            FA_SetMotors(0, 5);
-            FA_Forwards(15); // parallel parking type shit
-            FA_SetMotors(5, 0);
-        }
-        else if (right_encoder > left_encoder)
-        {
-            FA_SetMotors(5, 0);
-            FA_Forwards(15);
-            FA_SetMotors(0, 5);
-        }
-
-        left_encoder = FA_ReadEncoder(0);
-        right_encoder = FA_ReadEncoder(1);
-    }
-}
-
-int read_line(int option)
+int read_line()
 {
     static unsigned long last_time = 0;
     static unsigned long start_time = 0;
@@ -153,10 +100,25 @@ int read_line(int option)
 
 void adjust_for_wall()
 {
-    int front_left = FA_ReadIR(IR_FRONT_LEFT);
-    int front_right = FA_ReadIR(IR_FRONT_RIGHT);
+    int front = FA_ReadIR(IR_FRONT);
     int left = FA_ReadIR(IR_LEFT);
     int right = FA_ReadIR(IR_RIGHT);
+
+    if (left > 400 || right > 400) // if either sensor is above 400 then it adjusts
+    {
+        if (left > right)
+        {
+            FA_Right(3);
+        }
+        else
+        {
+            FA_Left(3);
+        }
+    }
+    if (front > 400) // until ir front isn't over 400 it reverses
+    {
+        FA_Backwards(3);
+    }
 }
 
 void set_walls(int front, int right, int left, int rear, Walls *walls)
@@ -219,6 +181,80 @@ void cell_to_grid(int direction, int *rows, int *columns)
     default:
         break;
     }
+}
+
+/*
+ * This function makes the robot stops 500ms after a line has been hit to stop
+ * in the middle of the cell, for the robot to see what the next moves are
+ * @param *pause_start_time pointer to when the pause_starts
+ * @param *rows pointer to rows passed in
+ * @param *columns pointer to the columns passed in
+ * @param *backtrack backtrack flag for when the robot needs to backtrack to get to unexplored cells
+ * @param *robot robot passed in, gives access to direction of the robot
+ */
+bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns, bool *backtrack, Robot *robot)
+{
+    static int motors_started = 0;             // motors started flag
+    static int stopping = 0;                   // stopping flag
+    static unsigned long line_detect_time = 0; // ms passed since a line has been detected
+    static unsigned long additional_line_detect_time = 0;
+
+    if (!motors_started && !stopping) // starts the motors at the beginning of the program, as after it needs to see a line to continue forward
+    {
+        if (FA_ReadIR(IR_FRONT) > OBSTACLE_SENSOR_THRESHOLD / 4) // specific edge case where robot starts facing a wall
+        {
+            FA_Right(90); // turns right
+        }
+        FA_SetMotors(MOTOR_SPEED_LEFT, MOTOR_SPEED_RIGHT); // motor then starts
+        motors_started = 1;                                // started flag now positive
+    }
+
+    if (read_line() && !stopping && line_detect_time == 0) // checks if a line is detected, robot isn't stopping and if the line hasn't been detected recently
+    {
+        cell_to_grid(robot->direction, rows, columns);
+        line_detect_time = FA_ClockMS();
+    }
+
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 200 && !stopping) // if after 200 ms whilst its not stopped
+    {
+        if (FA_ReadLine(0) < 100 && FA_ReadLine(1) < 100) // if the other line is detected
+        {
+            additional_line_detect_time = FA_ClockMS();                                               // gets the time an additional line was detected
+            if (additional_line_detect_time != 0 && FA_ClockMS() - additional_line_detect_time >= 20) // looks for new lines every 20ms
+            {
+                FA_BTSendString("IN A SPECICAL CELL!\n", 30);
+                if (FA_ReadLine(0) < 100 && FA_ReadLine(1) < 100 && FA_ClockMS - additional_line_detect_time >= 100) // another line has been detected
+                {
+                    FA_BTSendString("ANOTHER LINE DETECTED\n", 30);
+                }
+            }
+        }
+        else if (FA_ReadLine(0) > 100 && FA_ReadLine(1) > 100 && FA_ClockMS() - additional_line_detect_time >= 20)
+        {
+            FA_BTSendString("GAP DETECTED\n", 30);
+        }
+    }
+
+    if (line_detect_time != 0 && FA_ClockMS() - line_detect_time >= 600 && !stopping) // pauses the robot after a line has been detected
+    {
+        *pause_start_time = FA_ClockMS(); // gets the time when the pause started
+        FA_SetMotors(0, 0);               // actually stops the robot
+        motors_started = 0;
+        stopping = 1; // puts the robot in a stopped state
+        line_detect_time = 0;
+    }
+
+    if (stopping && FA_ClockMS() - *pause_start_time < 1000) // whilst the robot has been stopped adjust itself
+    {
+        adjust_for_wall();
+    }
+
+    if (stopping && FA_ClockMS() - *pause_start_time >= 1000) // checks if robot has been stopped for a long enough time i.e. 500ms
+    {
+        stopping = 0;
+        return true; // finished stopping
+    }
+    return false;
 }
 
 // remove this when submitting as it isn't needed
@@ -387,7 +423,6 @@ void wall_based_movement(Maze maze, int row, int column, bool *backtrack, Robot 
     Cell cell = maze.cells[row][column];
     int next_row = 0;
     int next_column = 0;
-    bool visited = false;
 
     if (cell.walls.front && cell.walls.left && cell.walls.right)
     {
@@ -475,7 +510,7 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
     if (maze->cells[*rows][*columns].is_intersection)
     {
         if (*backtrack)
-        { // when backtracking isn't true just skip this
+        {
             FA_BTSendString("Back at an intersection again\n", 30);
             (*backtrack) = false; // backtracking is completed now that it is in an intersection again
         }
@@ -502,8 +537,6 @@ void traverse_maze(unsigned long *pause_start_time, Maze *maze, bool *backtrack,
         int right = FA_ReadIR(IR_RIGHT);
         int rear = FA_ReadIR(IR_REAR);
 
-        adjust_using_wheel_encoders();
-
         set_walls(front, right, left, rear, &maze->cells[*rows][*columns].walls); // sets walls of cell
 
         set_intersection(&maze->cells[*rows][*columns]); // declares if cell is an intersection
@@ -523,14 +556,6 @@ void debug_line_sensors()
 void debug_IR()
 {
     FA_LCDClear();
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT_LEFT), 30, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT), 60, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_FRONT_RIGHT), 90, 20, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_RIGHT), 30, 12, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR_RIGHT), 90, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR), 60, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_REAR_LEFT), 30, 4, FONT_NORMAL, LCD_OPAQUE);
-    // FA_LCDNumber(FA_ReadIR(IR_LEFT), 90, 12, FONT_NORMAL, LCD_OPAQUE);
 
     FA_BTSendString("Front left", 20);
     FA_BTSendNumber(FA_ReadIR(IR_FRONT_LEFT));
@@ -603,8 +628,6 @@ int main(void)
     while (!FA_BTConnected()) // wait until bluetooth is connected
     {
     };
-
-    FA_BTSendNumber(10);
 
     FA_LCDBacklight(50);  // Switch on backlight (half brightness)
     FA_DelayMillis(2000); // Pause 2 secs
