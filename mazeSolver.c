@@ -29,7 +29,7 @@ void finished_maze() // plays an arpeggiated DMin7
 }
 
 /**
- * This function initialises the maze, by setting all values as 0 so they are initialises.
+ * This function initialises the maze, by setting all values as 0.
  */
 void initialise_maze(Maze *maze)
 {
@@ -59,7 +59,7 @@ void initialise_maze(Maze *maze)
 }
 
 /**
- * This function reads a large lines and returns if a line has been seen
+ * This function reads a large line and returns if a line has been seen
  */
 bool read_line()
 {
@@ -334,7 +334,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         line_detect_time = ClockMS();
     }
 
-    if (big_line_detected && line_detect_time != 0 && ClockMS() - line_detect_time > 200 && !stopping) // if after 250 ms since the big line has been seen
+    if (big_line_detected && line_detect_time != 0 && ClockMS() - line_detect_time > 200 && !stopping) // if after 200 ms since the big line has been seen
     {
         if (ReadLine(0) < 100 && ReadLine(1) < 100) // check line sensors
         {
@@ -355,7 +355,7 @@ bool stop_when_line_hit(unsigned long *pause_start_time, int *rows, int *columns
         }
     }
 
-    if (another_line_detected && (ClockMS() - another_line_detect_time > 100)) // if another line hasn't been detected in more than 125 ms reset
+    if (another_line_detected && (ClockMS() - another_line_detect_time > 100)) // if another line hasn't been detected in more than 100 ms reset
     {
         another_line_detected = false;
     }
